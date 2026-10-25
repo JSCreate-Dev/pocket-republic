@@ -6,7 +6,7 @@ The island tab now renders terrain, roads, buildings, camera pan/zoom, placement
 
 ## Build an IPA
 
-Pushes to `main` and pull requests run `.github/workflows/unsigned-ipa.yml` on the GitHub-hosted `xcode-27` runner with Xcode 27.1. That image is the hosted runner that includes the iOS 27.1 SDK. The workflow runs the core tests, builds an unsigned device IPA, and uploads `PocketRepublic-unsigned.ipa` plus its SHA-256. That unsigned IPA is the test-build artifact: unzip it and sideload it. It does not need Apple signing secrets.
+Pushes, including every merge to `main`, and pull requests run `.github/workflows/unsigned-ipa.yml` on the GitHub-hosted `xcode-27` runner with Xcode 27.1. That image is the hosted runner that includes the iOS 27.1 SDK. The workflow runs the core tests, builds an unsigned device IPA, and uploads `PocketRepublic-unsigned.ipa` plus its SHA-256. That unsigned IPA is the test-build artifact: unzip it and sideload it. It does not need Apple signing secrets.
 
 When the optional repository secrets listed in `PROGRESS.md` are all set, the same workflow also exports a signed IPA and uploads `PocketRepublic-signed.ipa`. The default export method is ad hoc.
 
