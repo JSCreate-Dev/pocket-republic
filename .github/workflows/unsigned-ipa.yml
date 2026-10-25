@@ -5,9 +5,15 @@ name: Build iOS IPA
 # macos-latest and macos-26 stop at Xcode 26.x, which cannot compile this
 # project's iOS 27.1 calls. Xcode 27.1 is installed at the path pinned below
 # and is the default Xcode on the xcode-27-arm64 image (build 27A9275).
+#
+# The unsigned IPA is the sideload artifact for test builds. Every push to
+# main and every pull request uploads it. Signing secrets are optional.
 
 on:
   push:
+    branches:
+      - main
+  pull_request:
   workflow_dispatch:
 
 permissions:

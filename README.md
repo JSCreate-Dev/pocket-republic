@@ -6,11 +6,11 @@ The island tab now renders terrain, roads, buildings, camera pan/zoom, placement
 
 ## Build an IPA
 
-A push or manual dispatch runs `.github/workflows/unsigned-ipa.yml` on the GitHub-hosted `xcode-27` runner with Xcode 27.1. That image is the hosted runner that includes the iOS 27.1 SDK. The workflow runs the core tests, builds an unsigned device IPA, and uploads `PocketRepublic-unsigned.ipa` plus its SHA-256. That path does not need Apple signing secrets.
+Pushes to `main` and pull requests run `.github/workflows/unsigned-ipa.yml` on the GitHub-hosted `xcode-27` runner with Xcode 27.1. That image is the hosted runner that includes the iOS 27.1 SDK. The workflow runs the core tests, builds an unsigned device IPA, and uploads `PocketRepublic-unsigned.ipa` plus its SHA-256. That unsigned IPA is the test-build artifact: unzip it and sideload it. It does not need Apple signing secrets.
 
-When the repository secrets listed in `PROGRESS.md` are set, the same workflow exports a signed IPA and uploads `PocketRepublic-signed.ipa`. The default export method is ad hoc, which installs on devices registered in the provisioning profile.
+When the optional repository secrets listed in `PROGRESS.md` are all set, the same workflow also exports a signed IPA and uploads `PocketRepublic-signed.ipa`. The default export method is ad hoc.
 
-The bundle identifier is `com.jscreate.pocketrepublic`, defined in `Config/PocketRepublic.xcconfig`. Extract an artifact ZIP before installing the IPA. An iPhone alone cannot compile the SwiftUI project.
+The bundle identifier is `com.jscreate.pocketrepublic`, defined in `Config/PocketRepublic.xcconfig`. An iPhone alone cannot compile the SwiftUI project.
 
 ## Saves
 
