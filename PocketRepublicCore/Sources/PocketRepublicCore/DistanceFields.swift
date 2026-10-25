@@ -41,7 +41,8 @@ public struct DistanceFields: Codable, Sendable {
     public mutating func rebuild(map: WorldMap, buildings: [Building]) {
         var sourcesByService: [UInt8: [TileIndex]] = [:]
         for b in buildings {
-            guard let s = b.provides else { continue }
+            // A site reaches nobody until it opens (docs/DESIGN.md section 7.10).
+            guard b.isOperational, let s = b.provides else { continue }
             // `tile` is the entrance: the only footprint cell connected to the roads.
             sourcesByService[s.rawValue, default: []].append(b.tile)
         }
@@ -54,7 +55,7 @@ public struct DistanceFields: Codable, Sendable {
         component = Self.labelComponents(map: map)
         nearestMarket = Self.nearestSourceMap(
             map: map,
-            sources: buildings.filter { $0.kind == .market }.map { ($0.id.raw, $0.tile) })
+            sources: buildings.filter { $0.kind == .market && $0.isOperational }.map { ($0.id.raw, $0.tile) })
         dirty = false
     }
 

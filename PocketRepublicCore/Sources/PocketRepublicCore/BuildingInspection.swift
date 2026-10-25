@@ -116,8 +116,14 @@ public enum BuildingInspector {
         ])
     }
 
-    /// First matching problem wins. Order lives in `BuildingInspectCatalog.problemPriority`.
+    /// A site reports its stage and ignores the problem list: it has no staff and no
+    /// stock yet, so "Understaffed" would just be noise (docs/DESIGN.md section 7.8).
+    /// The tone is `.calm`, not a new `.progress` case - adding one would break the
+    /// app's exhaustive switch over `InspectTone`, which is the iOS role's change.
     private static func status(_ building: Building, _ state: RepublicState) -> (String, InspectTone) {
+        if building.isUnderConstruction {
+            return (BuildingInspectCatalog.constructionStatus(building, config: state.config), .calm)
+        }
         for problem in BuildingInspectCatalog.problemPriority
         where BuildingInspectCatalog.matches(problem, building: building, state: state) {
             return (BuildingInspectCatalog.label(problem), .problem)
@@ -126,6 +132,9 @@ public enum BuildingInspector {
     }
 
     private static func peopleSection(_ building: Building, _ state: RepublicState) -> InspectSection? {
+        // Nobody lives or works at a site, so showing "0 / 4" invites the owner to
+        // go looking for a staffing problem that does not exist yet.
+        if building.isUnderConstruction { return nil }
         if building.kind == .house {
             let living = aliveResidents(of: building, in: state)
             var rows = [
@@ -164,24 +173,39 @@ public enum BuildingInspector {
     private static func numberRow(_ fact: BuildingInspectCatalog.NumberFact, building: Building,
                                   state: RepublicState) -> InspectRow? {
         switch fact {
+        case .opensOnDay:
+            guard building.isUnderConstruction else { return nil }
+            return InspectRow(id: fact.rawValue, title: "Opens",
+                              value: "Day \(building.opensOnDay)", tone: .plain)
+        case .buildProgress:
+            guard building.isUnderConstruction else { return nil }
+            return InspectRow(id: fact.rawValue, title: "Progress",
+                              value: "\(Int((building.constructionProgress * 100).rounded(.down)))%",
+                              tone: .plain)
         case .foodStored:
-            guard building.kind.storesFood else { return nil }
+            guard building.isOperational, building.kind.storesFood else { return nil }
             return InspectRow(id: fact.rawValue, title: "Food stored",
                               value: "\(building.foodStore)", tone: .plain)
         case .funds:
+            guard building.isOperational else { return nil }
             return InspectRow(id: fact.rawValue, title: "Funds",
                               value: "$\(building.funds)", tone: .plain)
         case .upkeep:
+            // A site is not charged upkeep until it opens, so quoting a rate here
+            // would contradict `SimulationEngine.payUpkeep`.
+            guard building.isOperational else { return nil }
             let rate = BuildingInspectCatalog.dailyUpkeep(building.kind, config: state.config)
             return InspectRow(id: fact.rawValue, title: "Upkeep",
                               value: "$\(rate)/day", tone: .plain)
         case .residentsInRange:
+            guard building.isOperational else { return nil }
             guard BuildingInspectCatalog.serviceKinds.contains(building.kind) else { return nil }
             let count = residentsInRange(of: building, in: state)
             return InspectRow(id: fact.rawValue, title: "Residents in range",
                               value: "\(count)", tone: .plain)
         case .dayBuilt:
-            return InspectRow(id: fact.rawValue, title: "Built",
+            return InspectRow(id: fact.rawValue,
+                              title: building.isUnderConstruction ? "Placed" : "Built",
                               value: "Day \(building.builtOnDay)", tone: .plain)
         }
     }
@@ -242,7 +266,7 @@ enum BuildingInspectCatalog {
     }
 
     enum NumberFact: String {
-        case foodStored, funds, upkeep, residentsInRange, dayBuilt
+        case opensOnDay, buildProgress, foodStored, funds, upkeep, residentsInRange, dayBuilt
     }
 
     enum BuildingProblem: String {
@@ -253,7 +277,8 @@ enum BuildingInspectCatalog {
     /// workplace cannot relieve a shortage), then an empty store or a hungry house.
     static let problemPriority: [BuildingProblem] = [.noRoadAccess, .understaffed, .noFood]
     static let runningWell = "Running well"
-    static let numberFacts: [NumberFact] = [.foodStored, .funds, .upkeep, .residentsInRange, .dayBuilt]
+    static let numberFacts: [NumberFact] = [.opensOnDay, .buildProgress, .foodStored, .funds,
+                                            .upkeep, .residentsInRange, .dayBuilt]
     static let serviceKinds: Set<BuildingKind> = [.market, .clinic, .school, .police]
 
     static func copy(for kind: BuildingKind) -> KindCopy {
@@ -281,6 +306,21 @@ enum BuildingInspectCatalog {
         case .intensive: return "Intensive"
         case .careful: return "Careful"
         }
+    }
+
+    static func stageLabel(_ stage: ConstructionStage) -> String {
+        switch stage {
+        case .foundation: return "Foundation"
+        case .scaffold: return "Scaffold"
+        case .complete: return "Complete"
+        }
+    }
+
+    /// "Under construction · Scaffold, 2 of 3 days".
+    static func constructionStatus(_ building: Building, config: BalanceConfig) -> String {
+        let progress = building.stageProgress(in: config)
+        let stage = stageLabel(building.stage(in: config))
+        return "Under construction · \(stage), \(progress.done) of \(progress.of) days"
     }
 
     static func label(_ problem: BuildingProblem) -> String {

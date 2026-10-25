@@ -117,6 +117,14 @@ extension BuildingKind {
     }
 }
 
+/// How far along a building site is. Drawn differently at each step
+/// (docs/DESIGN.md section 7.2); derived from the day counts, never stored.
+public enum ConstructionStage: UInt8, Codable, Sendable, CaseIterable {
+    case foundation = 0
+    case scaffold = 1
+    case complete = 2
+}
+
 public struct Building: Codable, Sendable, Identifiable {
     public let id: BuildingID
     public let kind: BuildingKind
@@ -133,17 +141,57 @@ public struct Building: Codable, Sendable, Identifiable {
     public var funds: Int64 = 0
     public var mode: OperatingMode = .balanced
 
+    // MARK: Construction (docs/DESIGN.md section 7)
+
+    /// Whole sim-days of work already done on this site. Only ever counted up by
+    /// `SimulationEngine.advanceConstruction`, one per tick.
+    public var daysConstructed: Int32 = 0
+    /// Total days of work this site needs. `0` means "was never a site" - worldgen
+    /// buildings and anything placed while `constructionDaysMultiplierPercent == 0`.
+    public var daysRequired: Int32 = 0
+
+    /// A site on the ground that is not finished yet. It owns its tiles and has been
+    /// paid for, but has no workers, residents, production, upkeep, or service reach.
+    public var isUnderConstruction: Bool { daysRequired > 0 && daysConstructed < daysRequired }
+    /// The one gate every simulation step checks before touching a building.
+    public var isOperational: Bool { !isUnderConstruction }
+
+    /// Derived for the renderer and inspect panel, never stored: a `Double` in
+    /// `RepublicState` would make `stateHash()` non-canonical.
+    public var constructionProgress: Double {
+        guard daysRequired > 0 else { return 1.0 }
+        return min(1.0, Double(daysConstructed) / Double(daysRequired))
+    }
+
+    /// The day this site becomes operational. Equal to `builtOnDay` when it never was one.
+    public var opensOnDay: Int32 { builtOnDay + max(0, daysRequired) }
+
+    /// Which of the three stages to draw. Finished buildings are always `.complete`.
+    public func stage(in config: BalanceConfig) -> ConstructionStage {
+        guard isUnderConstruction else { return .complete }
+        return daysConstructed < config.foundationDays(forRequired: daysRequired) ? .foundation : .scaffold
+    }
+
+    /// Days done and days needed *within the current stage*, for "2 of 3 days" text.
+    public func stageProgress(in config: BalanceConfig) -> (done: Int32, of: Int32) {
+        guard isUnderConstruction else { return (max(0, daysRequired), max(0, daysRequired)) }
+        let foundation = config.foundationDays(forRequired: daysRequired)
+        if daysConstructed < foundation { return (daysConstructed, foundation) }
+        return (daysConstructed - foundation, daysRequired - foundation)
+    }
+
     /// Service range, employment, and pathing all use the entrance.
     public var tile: TileIndex { entrance }
 
     public init(id: BuildingID, kind: BuildingKind, anchor: TileIndex, entrance: TileIndex,
-                district: DistrictID, builtOnDay: Int32) {
+                district: DistrictID, builtOnDay: Int32, daysRequired: Int32 = 0) {
         self.id = id
         self.kind = kind
         self.anchor = anchor
         self.entrance = entrance
         self.district = district
         self.builtOnDay = builtOnDay
+        self.daysRequired = max(0, daysRequired)
     }
 
     /// Footprint tiles in row-major order. Empty tiles of a demolished building

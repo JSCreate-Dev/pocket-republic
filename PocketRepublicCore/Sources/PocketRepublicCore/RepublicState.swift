@@ -14,8 +14,9 @@ public struct Policy: Codable, Sendable, Equatable {
 
 public struct RepublicState: Codable, Sendable {
     /// 2: buildings store an anchor plus an entrance, and the map records entrance tiles.
-    /// Saves written at version 1 do not decode; the app keeps the file and waits for a new city.
-    public static let currentSchemaVersion = 2
+    /// 3: buildings carry construction day counts (docs/DESIGN.md section 7).
+    /// Saves written at an older version do not decode; the app keeps the file and waits for a new city.
+    public static let currentSchemaVersion = 3
     public var schemaVersion: Int = RepublicState.currentSchemaVersion
 
     public let worldSeed: UInt64

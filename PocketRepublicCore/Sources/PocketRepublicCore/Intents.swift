@@ -42,12 +42,22 @@ extension SimulationEngine {
             case .rejected(let reason):
                 return .rejected(reason)
             case .valid(let entrance):
+                // Paid for in full up front, and the tiles are claimed immediately -
+                // only the building's *work* is staged (docs/DESIGN.md section 7.5).
                 s.transfer(from: .treasury, to: .external, kind.buildCost)
-                let id = WorldGenerator.construct(&s, kind, anchor: tile, entrance: entrance)
+                let required = s.config.constructionDays(for: kind)
+                let id = WorldGenerator.construct(&s, kind, anchor: tile, entrance: entrance,
+                                                  daysRequired: required)
                 let built = s.buildings[Int(id.raw)]
                 let site = EventLocation(district: built.district, building: id, tile: built.entrance)
-                s.emit(.buildingConstructed, location: site, magnitude: Int32(kind.buildCost))
-                if kind.offersCommission { raiseCommission(&s, building: id, at: site) }
+                // Ground broken today; `buildingConstructed` waits for the last day of
+                // work. With `constructionDaysMultiplierPercent == 0` there is no site
+                // stage at all and placement still reads as an opening, as it used to.
+                s.emit(required > 0 ? .buildingSiteStarted : .buildingConstructed,
+                       location: site, magnitude: Int32(kind.buildCost))
+                if kind.offersCommission {
+                    raiseCommission(&s, building: id, at: site, buildDays: required)
+                }
                 return .accepted
             }
 
@@ -182,7 +192,7 @@ extension SimulationEngine {
             // than topping up one market for half a day.
             let alive = Int32(s.citizens.reduce(into: 0) { $0 += $1.alive ? 1 : 0 })
             let bought = max(200, alive * s.config.foodPerCitizenPerDay * 4)
-            let markets = s.buildings.filter { $0.kind == .market }.map(\.id)
+            let markets = s.buildings.filter { $0.kind == .market && $0.isOperational }.map(\.id)
             if !markets.isEmpty {
                 let share = bought / Int32(markets.count)
                 var handed: Int32 = 0
@@ -215,7 +225,8 @@ extension SimulationEngine {
 extension SimulationEngine {
     /// A newly placed production building asks how it should be run, on the spot,
     /// so the tradeoff is attached to a place on the map rather than a menu.
-    static func raiseCommission(_ s: inout RepublicState, building: BuildingID, at site: EventLocation) {
+    static func raiseCommission(_ s: inout RepublicState, building: BuildingID, at site: EventLocation,
+                                buildDays: Int32 = 0) {
         var hard = AgendaEffect()
         hard.operatingMode = .intensive
         hard.favor(.merchants, 4)
@@ -229,7 +240,10 @@ extension SimulationEngine {
 
         s.agenda.append(AgendaItem(
             id: AgendaGenerator.nextID(&s), kind: .buildingCommission, tier: .advisory,
-            raisedOnDay: s.day, expiresOnDay: s.day + s.config.advisoryExpiryDays,
+            // The owner decides how the works will be run while they are being
+            // built, so the choice has to outlast the build (section 7.9).
+            raisedOnDay: s.day,
+            expiresOnDay: s.day + max(s.config.advisoryExpiryDays, buildDays + 2),
             faction: nil, location: site,
             causes: [CauseFactor(.policyChange, value: 0, detail: "new works")],
             options: [AgendaOption(id: 0, label: "Run it hard", effect: hard),

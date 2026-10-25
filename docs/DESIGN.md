@@ -526,7 +526,7 @@ Duo layout: nothing special. The island is the island, and the inspect panel is 
 
 Tapping a site works today and must keep working — its tiles are occupied, so `BuildingHitTest` finds it.
 
-- **Status** — `Under construction` wins over every other problem. It goes **first** in `BuildingInspectCatalog.problemPriority`, ahead of `noRoadAccess`, because "understaffed" is noise on a building that cannot have staff yet. The value line reads `Scaffold · 2 of 3 days` (stage name, then days done of days required). It needs its own tone (`InspectTone.progress`, not `.problem`) — a site is not a fault.
+- **Status** — `Under construction` wins over every other problem. It goes **first** in `BuildingInspectCatalog.problemPriority`, ahead of `noRoadAccess`, because "understaffed" is noise on a building that cannot have staff yet. The value line reads `Scaffold · 2 of 3 days` (stage name, then days done of days required). It needs its own tone (`InspectTone.progress`, not `.problem`) — a site is not a fault. Shipped as `.calm` for now; see 7.10.
 - **People** — the section is **hidden**. No workers row, no residents row; there is nobody there.
 - **Numbers** — `Opens` (`Day 14`, i.e. `builtOnDay + required`), `Progress` (`50%`), and `Placed` (`Day 10`). `Food stored`, `Funds`, `Upkeep` and `Residents in range` are all hidden until it opens, since each of them is 0 or a lie. After it opens the panel is exactly what section 1 already specifies, and the existing `Built · Day N` row keeps using `builtOnDay`, which stays the day it was **placed**.
 - **Actions** — the mode picker still shows for farm/workshop/dock, annotated `takes effect when it opens`. Demolish is labelled **Cancel construction**, and its confirmation says the money is not refunded.
@@ -552,11 +552,11 @@ Optional, and worth it if advisories start feeling unfair: a `CauseKind.underCon
 **New types and fields**
 
 - `ConstructionStage: UInt8, Codable, Sendable, CaseIterable` — `foundation = 0, scaffold = 1, complete = 2`.
-- `Building.constructionDaysDone: Int32 = 0` and `Building.constructionDaysRequired: Int32 = 0`. Both stored. `required == 0` means complete, so a decoded building with neither field set reads as finished.
+- `Building.daysConstructed: Int32 = 0` and `Building.daysRequired: Int32 = 0`. Both stored. `daysRequired == 0` means complete, so a decoded building with neither field set reads as finished. (Named `constructionDaysDone` / `constructionDaysRequired` when this section was first written; the shorter names are what shipped.)
 - Derived on `Building` (computed, not stored): `stage`, `isUnderConstruction`, `isOperational`, `constructionProgress: Double`, `stageProgress`, `opensOnDay`. The stage split needs `BalanceConfig`, so these take the config (or live on an extension that is handed it) rather than guessing.
 - `BalanceConfig`: `constructionDaysByKind: [Int32]` (9 entries, dense, indexed by `BuildingKind.rawValue`), `constructionDaysMultiplierPercent: Int32 = 100`, `constructionFoundationPercent: Int32 = 33`.
 - `EventKind.buildingSiteStarted`.
-- `BuildingInspectCatalog.BuildingProblem.underConstruction`, first in `problemPriority`, plus `InspectTone.progress`.
+- A construction branch in `BuildingInspector.status`, ahead of `problemPriority`. **Shipped with the existing `.calm` tone, not a new `InspectTone.progress`:** the app's `BuildingInspectPanel` switches over `InspectTone` exhaustively with no `default`, so adding a case is an iOS-target change and belongs in that role's pull request. `InspectTone.progress` and the dedicated `BuildingProblem.underConstruction` are still the right end state.
 - `RepublicState.schemaVersion` **2 → 3**. Per the saved-data rule a schema 2 file does not decode, the app keeps it, and play is blocked until **Start New City**. No migration.
 
 **Tick order.** One new step, at the **top** of `advance`, before the `fields.dirty` check:
@@ -568,7 +568,7 @@ Optional, and worth it if advisories start feeling unfair: a `CauseKind.underCon
    ...unchanged
 ```
 
-`advanceConstruction` walks buildings in **ascending `BuildingID`**, increments `constructionDaysDone` for each unfinished one, emits `buildingConstructed` for each that reaches `required`, and calls `fields.markDirty()` if any finished. It must run before the dirty check so that a building completing on day N is a service source *that same day* — otherwise a market opens and still feeds nobody for a day, which is a bug the player can see.
+`advanceConstruction` walks buildings in **ascending `BuildingID`**, increments `daysConstructed` for each unfinished one, emits `buildingConstructed` for each that reaches `required`, and calls `fields.markDirty()` if any finished. It must run before the dirty check so that a building completing on day N is a service source *that same day* — otherwise a market opens and still feeds nobody for a day, which is a bug the player can see.
 
 **Every other step skips unfinished buildings.** Each of these needs the guard, and the list is the review checklist:
 
