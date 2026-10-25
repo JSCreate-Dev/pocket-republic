@@ -24,15 +24,11 @@ public struct CityPoint: Equatable, Sendable {
     }
 }
 
-/// The only reads of today's per-tile occupancy array.
-///
-/// Game Logic's footprint PR will define `buildingAt` for this same question.
-/// Retarget `occupant(at:on:)` and `tiles(of:on:)` and leave the inspect panel alone.
+/// Reads of which building covers a tile. `tiles(of:on:)` walks the same lookup.
 public enum BuildingOccupancy {
     public static func occupant(at tile: TileIndex, on map: WorldMap) -> BuildingID? {
         guard tile.raw >= 0, Int(tile.raw) < map.tileCount else { return nil }
-        let raw = map.buildingAt[Int(tile.raw)]
-        return raw < 0 ? nil : BuildingID(raw)
+        return map.buildingAt(tile)
     }
 
     public static func tiles(of id: BuildingID, on map: WorldMap) -> [TileIndex] {

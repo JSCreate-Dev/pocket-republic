@@ -246,9 +246,12 @@ final class BuildingInspectionTests: XCTestCase {
     private func place(_ kind: BuildingKind, at tile: TileIndex, in state: inout RepublicState,
                        alsoCovering extra: [TileIndex] = [], day: Int32 = 4) -> BuildingID {
         let id = BuildingID(Int32(state.buildings.count))
-        state.buildings.append(Building(id: id, kind: kind, tile: tile,
+        state.buildings.append(Building(id: id, kind: kind, anchor: tile, entrance: tile,
                                         district: DistrictID(0), builtOnDay: day))
         occupy(id, tiles: [tile] + extra, in: &state)
+        if Int(tile.raw) >= 0, Int(tile.raw) < state.map.tileCount {
+            state.map.entranceAt[Int(tile.raw)] = true
+        }
         return id
     }
 
@@ -263,6 +266,7 @@ final class BuildingInspectionTests: XCTestCase {
     private func clearOccupancy(_ tiles: [TileIndex], in state: inout RepublicState) {
         for tile in tiles where Int(tile.raw) >= 0 && Int(tile.raw) < state.map.tileCount {
             state.map.buildingAt[Int(tile.raw)] = -1
+            state.map.entranceAt[Int(tile.raw)] = false
         }
     }
 
