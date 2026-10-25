@@ -1,0 +1,92 @@
+<html><head><style>
+body{margin:0;width:1400px;background:#CFE9EF;font-family:ui-rounded,'SF Pro Rounded','Nunito','DejaVu Sans',sans-serif;color:#3A2A1E;padding:28px;box-sizing:border-box}
+h1{font-size:26px;margin:0 0 4px}.note{font-size:13px;color:#7A6A5A;margin-bottom:18px}
+.grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:22px}
+.lbl{font-size:12px;font-weight:700;letter-spacing:.08em;color:#0E5E8C;text-transform:uppercase;margin:0 0 8px}
+.panel{background:#F4EBDD;border-radius:20px;box-shadow:0 4px 14px rgba(58,42,30,.18);padding:16px}
+.i{width:20px;height:20px;vertical-align:-4px}
+.pill{display:flex;gap:14px;background:#FFF8EC;border-radius:999px;padding:9px 16px;box-shadow:0 3px 10px rgba(58,42,30,.2);font-weight:700;font-size:15px;width:max-content}
+.pill span{display:flex;gap:5px;align-items:center}
+.card{background:#FFF8EC;border-radius:16px;padding:14px;box-shadow:0 2px 6px rgba(58,42,30,.12);margin-bottom:12px}
+.t{font-size:18px;font-weight:800}.flav{font-style:italic;color:#6E5A48;font-size:13.5px;margin:4px 0 10px}
+.cost{font-weight:800;font-size:15px}.free{color:#2E7D3A}
+.chip{display:inline-block;border-radius:999px;padding:3px 9px;font-size:12.5px;font-weight:700;margin:2px 3px 2px 0}
+.up{background:#DDF0D3;color:#2E6B25}.dn{background:#F8D9CC;color:#A63A16}
+ul{margin:8px 0;padding-left:18px;font-size:13.5px}
+.btns{display:flex;gap:8px;margin-top:10px}
+.b{border-radius:12px;padding:10px 16px;font-weight:800;font-size:15px;border:none}
+.p{background:#D2552E;color:white;box-shadow:0 2px 0 #9E3D1F}.s{background:transparent;color:#0E5E8C;border:2px solid #A9D8C8}.d{background:#FBE3DA;color:#B3361A;border:2px solid #E8A08A}
+.mast{font-family:Georgia,serif;font-weight:700;font-size:20px;border-bottom:3px double #3A2A1E;padding-bottom:4px;margin-bottom:8px;display:flex;justify-content:space-between}
+.mast small{font-family:inherit;font-size:12px;font-weight:600;color:#7A6A5A;align-self:end}
+.story{background:#FFFBF2;border-radius:10px;padding:10px 12px;margin-bottom:9px;border-left:6px solid transparent}
+.story h3{font-family:Georgia,serif;margin:0;font-size:16.5px}
+.crisis{border-left-color:#C8321E}.crisis h3{font-weight:900}.bad{border-left-color:#F2A47A}.bad h3{font-weight:600}.good{border-left-color:#5DAA45}.good h3{font-weight:400}
+.because{font-size:13px;color:#8A3A1E;margin-top:3px}.because b{color:#5A2A12}
+.names{font-size:12.5px;color:#6E5A48;text-decoration:underline dotted;margin-top:3px}
+.tag{white-space:nowrap;display:inline-block;font-size:11px;font-weight:800;background:#F5D58A;border-radius:6px;padding:1px 6px;margin-left:6px}
+.show{float:right;font-size:12.5px;font-weight:800;color:#0E5E8C}
+.routine{font-size:12.5px;color:#7A6A5A;border-top:1px solid #E2D3BC;padding-top:6px}
+.row{display:flex;align-items:center;gap:10px;background:#FFF8EC;border-radius:12px;padding:8px 10px;margin-bottom:6px}
+.av{width:38px;height:38px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:800;color:white}
+.nm{font-weight:800;font-size:15px}.job{font-size:12.5px;color:#7A6A5A}
+.bar{width:60px;height:7px;border-radius:4px;background:#E8DCC8;overflow:hidden}.bar i{display:block;height:100%}
+.status{background:#FBE3DA;color:#A63A16;font-weight:800;border-radius:10px;padding:6px 10px;font-size:13.5px;margin:8px 0}
+.kv{display:grid;grid-template-columns:1fr auto;font-size:14px;row-gap:5px}.kv b{text-align:right}
+.seg{display:flex;background:#E8DCC8;border-radius:10px;padding:3px;margin:10px 0}.seg div{flex:1;text-align:center;padding:6px;font-size:13px;font-weight:700;border-radius:8px}.seg .on{background:white;color:#D2552E}
+.sw{display:flex;gap:8px;flex-wrap:wrap}.sw div{width:78px;font-size:10.5px;text-align:center}.sw i{display:block;height:34px;border-radius:8px;margin-bottom:3px;box-shadow:inset 0 0 0 1px rgba(0,0,0,.1)}
+</style></head><body>
+<h1>Pocket Republic · UI style sheet v1</h1><div class=note>All names, numbers and stories are sample data for illustration. Spec: batch2/UI_STYLE.md · Content rules: docs/DESIGN.md §3</div>
+<div class=grid>
+<div>
+<p class=lbl>HUD stats pill</p>
+<div class=pill><span><img class=i src='file:///workspace/pr-art/batch2/icon_coin.imageset/icon_coin@3x.png'>1,240</span><span><img class=i src='file:///workspace/pr-art/batch2/icon_people.imageset/icon_people@3x.png'>86</span><span><img class=i src='file:///workspace/pr-art/batch2/icon_food.imageset/icon_food@3x.png'>+32</span><span><img class=i src='file:///workspace/pr-art/batch2/icon_happy.imageset/icon_happy@3x.png'>72%</span><span><img class=i src='file:///workspace/pr-art/batch2/icon_day.imageset/icon_day@3x.png'>Day 14</span></div>
+<p class=lbl style="margin-top:22px">Decree card</p>
+<div class=card><div style="display:flex;justify-content:space-between"><span class=t><img class=i src='file:///workspace/pr-art/batch2/icon_decree.imageset/icon_decree@3x.png'> Purge the graft registers</span><span class=cost><img class=i src='file:///workspace/pr-art/batch2/icon_coin.imageset/icon_coin@3x.png'>260</span></div>
+<div class=flav>"Auditors open every ledger in the Ministry. Some officials will not sleep tonight."</div>
+<span class="chip up">Landless ▲▲</span><span class="chip up">Labourers ▲</span><span class="chip dn">Officials ▼▼▼</span>
+<ul><li>Treasury: −260 now</li><li>Corruption down</li><li>Legitimacy up</li></ul>
+<div class=btns><button class="b p">Issue decree</button><button class="b s">Not now</button></div></div>
+<div class=card><div style="display:flex;justify-content:space-between"><span class=t>Raise the civic wage</span><span class="cost free">Free</span></div>
+<div class=flav>"Clerks, nurses and teachers get a little more in every pay packet."</div>
+<span class="chip up">Officials ▲▲▲</span><span class="chip dn">Merchants ▼▼</span>
+<ul><li>Civic wage +1/day</li></ul></div>
+<div class=card style="padding:10px 14px;display:flex;justify-content:space-between;font-size:14px"><b>Build a harbor granary</b><span style="color:#B3361A;font-weight:800"><img class=i src='file:///workspace/pr-art/batch2/icon_coin.imageset/icon_coin@3x.png'>400 · Need 40 more</span></div>
+</div>
+<div>
+<p class=lbl>Event feed (newspaper)</p>
+<div class=panel>
+<div class=mast>The Pocket Gazette<small>Day 14</small></div>
+<div class="story crisis"><span class=show>Show me ›</span><h3><img class=i src='file:///workspace/pr-art/batch2/icon_alert.imageset/icon_alert@3x.png'> Crisis in Harbor: food riot</h3><div class=because><b>Because</b> Harbor has gone 9 days without a market in range</div></div>
+<div class="story bad"><span class=show>Show me ›</span><h3>4 families went hungry in Harbor<span class=tag>3rd day running</span></h3><div class=because><b>Because</b> No market within reach for 9 days</div><div class=names>Ana Reyes, Tomás Ortiz and 2 others</div></div>
+<div class="story bad"><span class=show>Show me ›</span><h3>Old Town Market ran out of food</h3><div class=because><b>Because</b> Farm output fell after the dry spell</div></div>
+<div class="story good"><span class=show>Show me ›</span><h3>✓ A new clinic opens in Hillside</h3></div>
+<div class=routine>3 citizens found work · 1 new house built</div>
+</div>
+<p class=lbl style="margin-top:20px">Buttons</p>
+<div class=btns><button class="b p">Issue decree</button><button class="b s">Not now</button><button class="b d">Demolish</button></div>
+<p class=lbl style="margin-top:20px">Color tokens</p>
+<div class=sw><div><i style='background:#F4EBDD'></i>panel<br>#F4EBDD</div>
+<div><i style='background:#FFF8EC'></i>surface<br>#FFF8EC</div>
+<div><i style='background:#3A2A1E'></i>ink<br>#3A2A1E</div>
+<div><i style='background:#7A6A5A'></i>ink-2<br>#7A6A5A</div>
+<div><i style='background:#D2552E'></i>primary<br>#D2552E</div>
+<div><i style='background:#00C2EE'></i>accent<br>#00C2EE</div>
+<div><i style='background:#0E5E8C'></i>accent-ink<br>#0E5E8C</div>
+<div><i style='background:#5DAA45'></i>good<br>#5DAA45</div>
+<div><i style='background:#F2A47A'></i>warn<br>#F2A47A</div>
+<div><i style='background:#C8321E'></i>crisis<br>#C8321E</div>
+<div><i style='background:#F5D58A'></i>highlight<br>#F5D58A</div>
+<div><i style='background:#A9D8C8'></i>outline<br>#A9D8C8</div></div>
+</div>
+<div>
+<p class=lbl>Inspect panel</p>
+<div class=panel>
+<div style="display:flex;justify-content:space-between"><div><div class=t>Harbor Farm</div><div class=job>Farm · Harbor district</div></div><span style="font-size:22px;color:#7A6A5A">×</span></div>
+<div class=status>⚠ Understaffed: 2 of 6 workers</div>
+<div class=kv><span>Workers</span><b>2 / 6</b><span><img class=i src='file:///workspace/pr-art/batch2/icon_food.imageset/icon_food@3x.png'> Food stored</span><b>140</b><span><img class=i src='file:///workspace/pr-art/batch2/icon_coin.imageset/icon_coin@3x.png'> Upkeep</span><b>−6 / day</b><span>Built</span><b>Day 3</b></div>
+<div class=seg><div class=on>Staples</div><div>Cash crops</div><div>Fallow</div></div>
+<p class=lbl>Citizen rows</p>
+<div class=row><div class=av style="background:#00A9D0">AR</div><div style="flex:1"><div class=nm>Ana Reyes</div><div class=job>Farmhand · Harbor Farm</div></div><div><div class=job>Hunger</div><div class=bar><i style="width:80%;background:#F2622A"></i></div><div class=job>Happy</div><div class=bar><i style="width:40%;background:#F5C542"></i></div></div></div>
+<div class=row><div class=av style="background:#D2552E">TO</div><div style="flex:1"><div class=nm>Tomás Ortiz</div><div class=job>Fisher · Dock</div></div><div><div class=job>Hunger</div><div class=bar><i style="width:20%;background:#5DAA45"></i></div><div class=job>Happy</div><div class=bar><i style="width:75%;background:#5DAA45"></i></div></div></div>
+<div class=btns style="justify-content:flex-end"><button class="b d">Demolish…</button></div>
+</div></div></div></body></html>
