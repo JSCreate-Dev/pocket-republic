@@ -28,19 +28,18 @@ Saves: a valid city is `Application Support/PocketRepublic/spatial-v1.json` (env
 
 The test tree contains **51** `func test` methods (the previous 41, plus `BuildingInspectionTests` for hit-testing, the inspect model, and `setOperatingMode`). [PocketRepublicCore/README.md](PocketRepublicCore/README.md) records a Linux Swift 6.2 pass and says 40 tests, plus release timings (about 0.52 ms/tick at 1000 citizens). This pass re-ran the suite in debug on Swift 6.2 and did not re-measure those release timings. `EconomyReportTests` prints the 200-day dashboard and only asserts that the 250 citizens stay alive.
 
+CI uploads an unsigned device IPA for sideloading. `.github/workflows/unsigned-ipa.yml` runs on every push, including each merge to `main`, and on pull requests, on the hosted `xcode-27` runner with Xcode 27.1. The artifact is `PocketRepublic-unsigned-ipa` (`PocketRepublic-unsigned.ipa` plus its SHA-256). That file is the test-build deliverable. The bundle id is `com.jscreate.pocketrepublic`, defined only in `Config/PocketRepublic.xcconfig`; Debug and Release both include that file, and generated `Info.plist` takes `CFBundleIdentifier` from it. Optional signing secrets can also upload `PocketRepublic-signed-ipa`. They are not required for a test build.
+
 ### Unverified
 
-`runs-on: xcode-27` in `.github/workflows/unsigned-ipa.yml` is a real GitHub-hosted label. The [GitHub changelog for 2026-10-15](https://github.blog/changelog/2026-10-15-xcode-27-runner-image-generally-available/) marks the image generally available: macOS 27, Xcode 27 toolchain, Apple silicon only, labels `xcode-27` and `xcode-27-xlarge`. The [runner image readme](https://github.com/actions/runner-images/blob/main/images/macos/xcode-27-arm64-Readme.md) (image `20261023.0307.1`) lists Xcode 27.1 as the default at `/Applications/Xcode_27.1.app`, which is the workflow's `DEVELOPER_DIR`, and includes the iOS 27.1 SDK plus an iPhone Duo simulator. That readme's announcement list still links the earlier public-preview issue, so preview-versus-GA wording disagrees across GitHub pages; the changelog is the GA notice. This workflow builds a generic `iphoneos` device app and does not boot the Duo simulator. No green run of this workflow is recorded in the repo.
+The workflow builds a generic `iphoneos` app and does not boot the Duo simulator. `macos-latest` / `macos-26` still stop at Xcode 26.6, so they cannot compile `reservedRegions`.
 
-[README.md](README.md) still says to open the project in Xcode 16.4 on a macOS 15 runner. The workflow used that pair until commit `d1e6ac2` (2026-10-25), which switched the label and `DEVELOPER_DIR` and did not update the README. `IslandView` calls `reservedRegions` inside `#available(iOS 27.1, *)`. That symbol still has to exist in the SDK at compile time, so the Xcode 16.4 instruction does not match the current island file. The Xcode project still says `CreatedOnToolsVersion = 15.0` and `LastUpgradeCheck = 1500`.
-
-Jordan's iPhone playtest is recorded below. Which binary that was, and whether CI produced it, is not in the repo.
+The Xcode project still says `CreatedOnToolsVersion = 15.0` and `LastUpgradeCheck = 1500`. Jordan's iPhone playtest is recorded below. Which binary that was is not in the repo. Later test builds should sideload the unsigned IPA from the main or pull-request run.
 
 ### Known issues
 
 - **Hunger with food surplus.** [PocketRepublicCore/README.md](PocketRepublicCore/README.md) records a 200-day unattended run (the same shape as `EconomyReportTests.testPrintEconomyReport`: seed 2026, 250 citizens, `autoResolve` picking option 0) in which 47 of 250 citizens are hungry (~19%) while production is about 372/day against 250/day needed and about 164/day spoils. The test prints those lines and does not assert them, and this pass did not re-run it. The mechanism in `feedCitizens` matches that diagnosis: a citizen goes hungry when the home tile has no market inside `maxServiceDistance`, the market lacks a full ration, or the citizen cannot pay `foodPrice` (a short payment is refunded). `spoil` then removes `marketSpoilagePercent` of each farm and market store. Supply is in surplus on paper; distribution and affordability leave people hungry.
-- **One-tile buildings, placeholder building art.** `WorldMap.buildingAt` stores one building id per tile. Sprites are flat UIColor blocks; there are no building images. The app icon is `PocketRepublic/Assets.xcassets/AppIcon.appiconset/AppIcon-1024.png` (1024×1024, 8-bit RGB, no alpha), selected with `ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon` on the app target. Style rules are in [docs/ART_DIRECTION.md](docs/ART_DIRECTION.md).
-- **Placeholder bundle id** `com.example.PocketRepublic` on Debug and Release.
+- **One-tile buildings, placeholder building art.** `WorldMap.buildingAt` stores one building id per tile. Sprites are flat UIColor blocks; there are no building images. The app icon is `PocketRepublic/Assets.xcassets/AppIcon.appiconset/AppIcon-1024.png` (1024×1024, 8-bit RGB, no alpha), selected with `ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon` on the app target. Style rules are in [docs/ART_DIRECTION.md](docs/ART_DIRECTION.md). The bundle id is `com.jscreate.pocketrepublic` in `Config/PocketRepublic.xcconfig`, not `com.example.PocketRepublic`.
 - **Legacy save left behind.** `pocket.republic.save.v1` is detected and never migrated.
 - **Inspect host is still the controls rail.** The panel view does not present a sheet. The design's unfolded side-by-side pane and folded bottom sheet are not built, and a tap does not wiggle the sprite or follow a resident.
 - **Walkers are a home–work shuttle**, unrelated to entrances or the clock.
@@ -98,7 +97,6 @@ Built on Game Logic's core API, after the core PR merges.
 - Render footprints from the core sizes and `tilesCovered`, including the sprite base in [docs/DESIGN.md](docs/DESIGN.md). Move the island toward the Duo postures in that doc (unfolded map plus panel, folded bottom sheet, selection and camera kept).
 - Inspect panel contents landed in PR #7 (see the log). Still open: host that same view in the unfolded side pane and the folded bottom sheet, and the inspect wiggle / follow-a-resident moment.
 - Decree cards and the newspaper event feed from section 3: title, flavor, cost or Free, faction chips, plain-language effects, **Issue decree** / **Not now**, and stories grouped by kind, district, and day with a because-line, names, and **Show me**.
-- CI and device build: get `.github/workflows/unsigned-ipa.yml` green on `xcode-27`, update the README toolchain lines so they match the workflow, and replace bundle id `com.example.PocketRepublic` when signing needs a real id.
 
 ### Game Logic
 
@@ -124,6 +122,12 @@ The core PR merges first.
 
 ## Log
 
+### 2026-10-25 11:34 AM EDT — Ios Dev — `cursor/ci-ipa-bundle-id-71ac` (PR #5)
+
+- **Changed:** No product code. Recorded the post-merge CI result in this log.
+- **Verified:** Push run [40207372598](https://github.com/JSCreate-Dev/pocket-republic/actions/runs/40207372598) on `21da51c` succeeded on `xcode-27` with Xcode 27.1 (`27A9275`). It uploaded `PocketRepublic-unsigned-ipa` (415,372 bytes). The IPA's `CFBundleIdentifier` is `com.jscreate.pocketrepublic`, `DTSDKName` is `iphoneos27.1`, and the minimum OS is 17.0. The signed upload was skipped because the four optional signing secrets are unset. That unsigned file is the sideload test build.
+- **Next:** Optional signing still needs `APPLE_CERTIFICATE_P12_BASE64`, `APPLE_CERTIFICATE_PASSWORD`, `APPLE_PROVISIONING_PROFILE_BASE64`, and `APPLE_TEAM_ID` only if a signed IPA is wanted. Game Logic's footprint-core PR still merges before ghost preview, footprint rendering, and the inspect panel.
+
 ### 2026-10-25 11:33 AM EDT — Ios Dev — `cursor/building-inspect-panel-ef49` (PR #7)
 
 - **Changed:** Tap-to-inspect. `BuildingInspectPanel` is a self-contained view in the island controls column (not a bottom sheet). Selection highlights every tile the occupancy map assigns to the building. The model is `BuildingInspection`, ordered status, then staffing, then numbers, from fields the core already tracks. The only core command added is `PlayerIntent.setOperatingMode`, because nothing else could change `OperatingMode` after the placement commission. Footprints, hunger, and walker routing were not touched.
@@ -135,6 +139,12 @@ The core PR merges first.
 - **Changed:** Merged `origin/main` (`b960f52`) with a merge commit. Kept this file from main, refreshed Current state for the art that is now in the tree, and added this entry. `docs/ART_DIRECTION.md` is art direction v1. Added `PocketRepublic/Assets.xcassets/AppIcon.appiconset` (Xcode 14+ single-size 1024×1024 universal iOS icon) and set `ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon` on the app target Debug and Release configurations. The asset catalog was already in the target resources. The short `PROGRESS.md` from this branch is not kept.
 - **Verified:** `AppIcon-1024.png` is 1024×1024, 8-bit RGB (color type 2), with no alpha and no `tRNS` chunk. `Contents.json` parses. No simulation, gameplay, bundle ID, or CI edits. No Xcode or `actool` here, so the catalog was not compiled. No Swift toolchain, so `swift test` was not run.
 - **Next:** Building sprites are Visual And Grapchics' remaining art work, sized from the footprint table in `docs/DESIGN.md` and the style in `docs/ART_DIRECTION.md`. The island still draws flat color blocks. Game Logic's footprint-core PR still merges before Ios Dev builds the ghost, renderer, inspect panel, and CI.
+
+### 2026-10-25 11:28 AM EDT — Ios Dev — `cursor/ci-ipa-bundle-id-71ac` (PR #5)
+
+- **Changed:** Merged `origin/main` (`b960f52`, PR #3) into this branch. Kept the shared `PROGRESS.md` and put this entry at the top of the log. Replaced bundle id `com.example.PocketRepublic` with `com.jscreate.pocketrepublic`, defined only in `Config/PocketRepublic.xcconfig`. The unsigned IPA is the sideload artifact for test builds. The workflow uploads `PocketRepublic-unsigned-ipa` on every push, including each merge to `main`, and on pull requests. Signing secrets stay optional and only add `PocketRepublic-signed-ipa` when all four are set.
+- **Verified:** Run `40206715750` on the pre-merge commit succeeded on `xcode-27` with Xcode 27.1 (`27A9275`). The artifact is an `iphoneos27.1` IPA whose `CFBundleIdentifier` is `com.jscreate.pocketrepublic`. The signed step logged that `APPLE_CERTIFICATE_P12_BASE64`, `APPLE_CERTIFICATE_PASSWORD`, `APPLE_PROVISIONING_PROFILE_BASE64`, and `APPLE_TEAM_ID` are unset, and skipped that upload. Core tests ran in that job (41 tests). No local Swift toolchain here. The main-and-pull-request trigger is in this merge and still needs its own green run.
+- **Next:** Optional signing, if wanted later, needs those four secrets plus an Apple Distribution certificate and an Ad Hoc profile for `com.jscreate.pocketrepublic`. Game Logic's footprint-core PR still merges before ghost preview, footprint rendering, and the inspect panel. The 11:34 AM entry records the green upload.
 
 ### 2026-10-25 11:25 AM EDT — Docs agent — `cursor/progress-log-d016` (PR #3)
 
