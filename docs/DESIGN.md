@@ -1,6 +1,6 @@
 # Pocket Republic — Design
 
-Owner: Game Designer. This doc is the source of truth for building footprints, placement and inspect-panel content, and the game-feel targets every PR is judged against.
+Owner: Game Designer. This doc is the source of truth for building footprints, placement, construction stages and inspect-panel content, and the game-feel targets every PR is judged against.
 
 **North star:** Pocket Republic should feel like a lively, living world with real game feel, not a spreadsheet sim, and it's built for the iPhone Duo screen, both folded and unfolded.
 
@@ -36,7 +36,8 @@ Today every building covers one tile (`Building.tile`) and is drawn as a 26×23 
 4. Pathing: only the entrance tile is passable, and walkers route around the rest of the footprint.
 5. Demolishing clears every covered tile.
 6. While placing, show a ghost tinted green or red, with the reason taken from `IntentRejection` when it's invalid. For service buildings, also draw their `maxServiceDistance` (20 tiles) reach.
-7. Rotation can wait for a later version.
+7. A placed building is not finished. It claims its tiles immediately and rises through construction stages before it does anything. Section 7 is the spec.
+8. Rotation can wait for a later version.
 
 ### Sprite sizing (for art)
 A W×H-tile building has an isometric base (W+H)×32 px wide and (W+H)×16 px tall at 1x, anchored at its front (bottom) corner, with building height added on top.
@@ -66,7 +67,7 @@ Only show what the core already tracks.
   Determinism holds **within a save**, for replays and tests. A new game never reuses a seed. A "Replay this island" option or a seed shown for sharing can come later.
 
 ### Moments that should feel rewarding
-1. **Placing a building.** The ghost snaps to the grid, then the building lands with a small bounce, a puff of dust, a light haptic and a sound hook. Within seconds its first workers walk in through the entrance.
+1. **Placing a building.** The ghost snaps to the grid, then the **foundation** lands with a small bounce, a puff of dust, a light haptic and a sound hook. The building rises through its construction stages over the next few days and opens with a pop; its first workers walk in through the entrance once it does. Section 7 is the spec.
 2. **A building comes alive.** Lights switch on, the workshop chimney smokes, farm carts roll out toward the market, and a ship docks.
 3. **Covering a neighbourhood.** Placing a clinic, school or police station sends a coverage ring rippling out, and houses in range briefly show a happy icon.
 4. **Market day.** The crowd at the market grows with its food supply, so stalls look full and busy when the city is fed.
@@ -142,7 +143,8 @@ The event feed is the island's newspaper, so it reports stories, not rows.
 | citizenTurnedToCrime | "{name} turned to crime in {district}" |
 | districtNeglected | "{district} feels forgotten: no {service} for {days} days" |
 | districtProtest | "Crowds gather in {district}" |
-| buildingConstructed | "A new {building} opens in {district}" |
+| buildingSiteStarted | "Ground is broken for a new {building} in {district}" |
+| buildingConstructed | "A new {building} opens in {district}" (fires on completion, see section 7.9) |
 | buildingAbandoned | "The {building} in {district} stands empty" |
 | migrationArrival / Departure | "{n} newcomers arrived" / "{n} citizens left the island" |
 | factionDemandRaised | "The {faction} demand action on {concern}" |
@@ -370,3 +372,243 @@ struct MindChoice { let index: Int; let reason: CauseKind; let text: String? }
 - Aim for **under 1.5 s of total model time per in-game day**, entirely off the main thread. If it runs over, the rules' answers stand.
 - **Battery:** skip model calls in Low Power Mode, when the device is thermally throttled, or when the game is backgrounded, and use the rules instead.
 - Everyone else always uses `RuleMind`. The model shapes a handful of visible "characters" each day, not the whole population.
+
+## 7. Construction stages
+
+A placed building should **rise**, not pop into existence finished. Playtest item 2 asked for buildings that take up real space; this is the other half of that: a building that occupies space has to be *built*, and watching it get built is what makes placement feel like a decision with weight.
+
+This section is the spec for next-round item 1. Game Logic owns the core state (7.10), Visual And Grapchics owns the stage art (7.6), and Ios Dev owns the stage rendering and the completion pop (7.7). Nothing here is implemented yet.
+
+### 7.1 What the reference games do
+
+- **Tropico:** a placed building becomes a fenced site with a foundation, then a timber frame with construction workers walking in and out, then the finished building. Work mode is chosen at placement and only matters once the doors open.
+- **Cities: Skylines:** a ploppable appears as a levelled lot, then rises through a scaffold/shell state on a timer, then switches to the finished mesh. It produces nothing and consumes no upkeep until it is done.
+- **Both:** the site blocks the ground from the moment it is placed, so the player cannot double-book a plot, and the pathing network treats it as solid immediately.
+
+We take all three of those: the ground is claimed at placement, nothing works until it opens, and the building is visibly different at every step.
+
+### 7.2 The three stages
+
+| Stage | Raw | Means |
+|---|---|---|
+| `foundation` | 0 | The plot is staked out and levelled. Footprint outline, dug earth, a corner stone. |
+| `scaffold` | 1 | Timber frame going up, builders on site, a materials pile. The building's silhouette is readable but shorter than finished. |
+| `complete` | 2 | The finished building. This is the only stage that does anything in the simulation. |
+
+A building is **under construction** in stages `foundation` and `scaffold`. "Opens" below always means it reached `complete`.
+
+### 7.3 Timings, in sim-days
+
+The clock advances one day per **Advance One Day**, so build time is measured in player taps. Four days is the ceiling: past that, placing a clinic stops reading as progress and starts reading as a penalty.
+
+| Building | Footprint | Build days | Foundation | Scaffold |
+|---|---|---|---|---|
+| House | 2×2 | 2 | 1 | 1 |
+| Police | 2×2 | 3 | 1 | 2 |
+| Market | 3×2 | 3 | 1 | 2 |
+| Workshop | 3×2 | 3 | 1 | 2 |
+| Farm | 3×3 | 3 | 1 | 2 |
+| Clinic | 3×3 | 4 | 2 | 2 |
+| School | 3×3 | 4 | 2 | 2 |
+| Dock | 2×3 | 4 | 2 | 2 |
+| Town Hall | 3×3 | 0 | — | — |
+
+Reasons for those numbers, so they can be re-tuned on purpose:
+
+- **House is 2 days** because it is the building the player places most often and the one that answers the most common pressure (nowhere to live). A housing fix that takes four taps feels like the game is arguing with the player.
+- **3 days** for the cheap workplaces and the market. Long enough that an opening is an event, short enough that a food problem is still fixable inside a famine's `famineCrisisDays` window plus a day.
+- **4 days** for the expensive buildings — clinic (400), school (350), dock (500). Cost and build time should agree, so the big spend also feels like a commitment of time.
+- **Town Hall is 0.** Only `WorldGenerator` places it, and a new city has to be playable on day 0.
+
+Build days are **data, not code**: `BalanceConfig.constructionDaysByKind`, a dense 9-element `[Int32]` indexed by `BuildingKind.rawValue` (dense array, not a dictionary — see the saved-data rule in AGENTS.md). `BalanceConfig.constructionDaysMultiplierPercent` (default 100) scales the whole table; **0 means every building opens the day it is placed**, which is the current behaviour and the setting a test uses when it does not care about construction.
+
+### 7.4 The stage split rule
+
+Stored state is two integers per building: days done, and days required. Stage is derived, so it cannot drift out of sync with the counters.
+
+```
+required       = max(0, constructionDaysByKind[kind] * constructionDaysMultiplierPercent / 100)
+foundationDays = required <= 1 ? required
+                               : max(1, min(required - 1, ceilDiv(required * constructionFoundationPercent, 100)))
+scaffoldDays   = required - foundationDays
+
+stage = done >= required   ? .complete
+      : done <  foundationDays ? .foundation
+      : .scaffold
+```
+
+`BalanceConfig.constructionFoundationPercent` defaults to **33**, which gives the splits in the 7.3 table (2 → 1+1, 3 → 1+2, 4 → 2+2). `required == 1` skips `scaffold` entirely; `required == 0` means the building is `complete` the moment it is placed.
+
+Progress is exposed two ways, both **derived, never stored**:
+
+- `constructionProgress: Double` — `required == 0 ? 1.0 : Double(done) / Double(required)`, clamped to `0...1`. This is the 0-to-1 number the renderer asked for.
+- `stageProgress: (done: Int32, of: Int32)` — whole days inside the current stage, for the "1 of 2 days" copy in the inspect panel.
+
+No `Double` is ever written into `RepublicState`. A float in the save makes `stateHash()` non-canonical across platforms, which breaks the determinism tests and the save checksum.
+
+**Worked example.** A clinic placed on day 10: `required` 4, `foundationDays` 2.
+
+| After | done | Stage | Progress |
+|---|---|---|---|
+| placement, day 10 | 0 | foundation | 0.00 |
+| advance to day 11 | 1 | foundation | 0.25 |
+| advance to day 12 | 2 | scaffold | 0.50 |
+| advance to day 13 | 3 | scaffold | 0.75 |
+| advance to day 14 | 4 | **complete** | 1.00 |
+
+The foundation is visible the instant the building is placed — the player's tap always produces something on the ground immediately (section 2: feedback within 100 ms). `opensOnDay == builtOnDay + required`, exactly, because construction has no RNG in it (7.11).
+
+### 7.5 Does it produce or cost anything while under construction?
+
+**It costs its full price up front and nothing after that, and it does nothing at all until it opens.** One rule, no partial states to balance.
+
+| | While under construction | Reason |
+|---|---|---|
+| Build cost | **Charged in full at placement**, unchanged from today (`treasury → external` in `apply(.placeBuilding)`) | Staged payments would need new ledger terms for money owed, and the conservation check has no concept of a liability |
+| Daily upkeep | **None.** `payUpkeep` skips it | An empty shell is not being run. Paying upkeep on a site is a hidden tax on building anything |
+| Wages | None — it has no workers | |
+| Workers | **None.** `assignWork` treats its `workerCapacity` as 0 | Nobody staffs a building that isn't there. The builders on screen are not citizens (7.7) |
+| Residents | **None.** A house under construction is not a free house | `WorldGenerator.freeHouse` and anything that houses an arrival must skip sites, or citizens live in a hole in the ground |
+| Production | None — `produce` skips it | |
+| Food | **Stays 0.** Excluded from `distributeFood`, `spoil`, and `Ledger.expectedFoodTotal`'s stores | Nothing enters or leaves, so the food identity holds untouched |
+| Business tax | Nothing to collect; its `funds` are 0 | |
+| Service coverage | **None.** Not a source in `DistanceFields.rebuild`, so it adds no market/clinic/school/police reach | A market with no roof cannot feed anyone. This is the one place where the delay has real teeth, and it should: covering a neighbourhood is supposed to be worth planning ahead for |
+| Operating mode | Can be set, takes effect when it opens | The placement commission still fires at placement (7.9) |
+| Ground / pathing | **Blocked from the moment it is placed**, entrance passable, exactly as a finished building | The plot is claimed, walkers route around the site, and the player cannot place two buildings on one lot |
+| Demolish | Allowed, **no refund** | Matches Tropico. A refund percentage is a tunable we can add later (`demolishRefundPercent`, default 0) if cancelling turns out to be a trap in playtests |
+
+The honest cost of this design: between placing a market and that market feeding anyone there are now three days of nothing. That is intentional — it is what makes an opening feel like an opening — but it means the placement ghost's coverage ring has to say *when* (7.8), and it means the famine crisis can fire while the fix is already under way. If playtests show players getting punished for a problem they had already solved, the lever is `constructionDaysMultiplierPercent`, not an exception in the rules.
+
+### 7.6 What is visually different at each stage (for art)
+
+Every stage uses the **same isometric base width and the same anchor as the finished sprite**: a W×H building is `(W+H)×32` px wide at 1x, anchored `(0.5, 0.0)` on its front (south) corner, as in section 1 and `docs/art/sprites.json`. A stage sprite swap must never move the building on the ground.
+
+Stage art is **per footprint shape, not per building kind** — 4 shapes × 2 unfinished stages = 8 new imagesets. A scaffold reads as a scaffold whatever is going up inside it, and this keeps the batch small.
+
+**3×2 and 2×3 are different shapes.** Their bounding boxes match (both 160 px wide) but their base diamonds point the other way, so they need separate artwork. They must not share one asset — the market/workshop/dock sprites already sitting on square bases is the bug this avoids repeating.
+
+| Asset | Footprint | 1x size | Content |
+|---|---|---|---|
+| `site_foundation_2x2` | 2×2 | 128×74 | Base diamond (128×64) plus a 10 px dug lip |
+| `site_foundation_3x2` | 3×2 | 160×90 | Base diamond (160×80) plus a 10 px dug lip, long axis on +x |
+| `site_foundation_2x3` | 2×3 | 160×90 | Same box, diamond long axis on +y |
+| `site_foundation_3x3` | 3×3 | 192×106 | Base diamond (192×96) plus a 10 px dug lip |
+| `site_scaffold_2x2` | 2×2 | 128×96 | |
+| `site_scaffold_3x2` | 3×2 | 160×112 | |
+| `site_scaffold_2x3` | 2×3 | 160×112 | Diamond long axis on +y |
+| `site_scaffold_3x3` | 3×3 | 192×136 | Tall enough for a simple crane arm |
+
+Naming and format follow `docs/art/ASSETS.md`: an `.imageset` with @1x/@2x/@3x PNGs with alpha, in `PocketRepublic/Assets.xcassets/Buildings/`. Scaffold heights are deliberately **shorter than every finished sprite of the same footprint** (the shortest finished 2×2 is police at 114, the shortest 3×3 is farm at 154), so completion always reads as the building standing up.
+
+**Foundation** — flat, quiet, unmistakably "not yet a building": levelled dug earth filling the footprint diamond, a rope-and-stake outline on the perimeter, one corner foundation stone, a couple of pegs. No vertical structure. The outline is what communicates *how much ground this will take*, so the diamond edge is the strongest line in the sprite.
+
+**Scaffold** — vertical and busy: a timber frame roughly the footprint's outline, planks at two levels, a materials pile (timber and stone) on the entrance side, a ladder. The 3×3 gets a small crane arm. The frame is open, so the tile behind it reads through; this stage should look *temporary*.
+
+**Complete** — the existing `building_<kind>` sprites, unchanged.
+
+Palette and lighting follow `docs/art/UI_STYLE.md`. Site art is warm raw material (earth, bare timber, grey stone) against the finished buildings' painted walls, so an unfinished city block is legible at a glance even at far zoom.
+
+### 7.7 The island: stage rendering and the pop (for Ios Dev)
+
+Three transitions, all driven by the day advance:
+
+1. **Placement → foundation.** Immediate, on the tap. The foundation sprite lands with the small bounce, dust puff, light impact haptic and sound hook that section 2, moment 1 already specifies. The feel of "placing a building" moves to the foundation; it does not wait for completion.
+2. **Foundation → scaffold.** On the day advance that crosses the boundary, cross-fade the sprites over ~0.2 s with a small dust puff at the base. No haptic — this is not a player action.
+3. **Scaffold → complete.** The **pop**: the scaffold drops away, the finished sprite scales 0.85 → 1.06 → 1.00 over ~0.25 s with an ease-out overshoot, a dust ring at the base, a light impact haptic, and a sound hook. This is the moment the building was being built for, and it is the loudest of the three.
+
+Between advances, a scaffold site is **ambiently alive**: 2 builder figures loop on the site perimeter and a banner/pennant on the frame moves. Those builders are **decoration — they are not citizens, they write no simulation state**, exactly like today's drifting road dots. They exist so that a paused city still looks like it is being built.
+
+No number on the map. "2 of 3 days" belongs in the inspect panel; floating progress text over the island is the spreadsheet feel the north star rules out. A site under construction may be dimmed a touch relative to working buildings, since section 2's rule is that lit and busy means healthy.
+
+Duo layout: nothing special. The island is the island, and the inspect panel is wherever section 2 puts it for the current posture.
+
+### 7.8 Inspect panel while under construction
+
+Tapping a site works today and must keep working — its tiles are occupied, so `BuildingHitTest` finds it.
+
+- **Status** — `Under construction` wins over every other problem. It goes **first** in `BuildingInspectCatalog.problemPriority`, ahead of `noRoadAccess`, because "understaffed" is noise on a building that cannot have staff yet. The value line reads `Scaffold · 2 of 3 days` (stage name, then days done of days required). It needs its own tone (`InspectTone.progress`, not `.problem`) — a site is not a fault.
+- **People** — the section is **hidden**. No workers row, no residents row; there is nobody there.
+- **Numbers** — `Opens` (`Day 14`, i.e. `builtOnDay + required`), `Progress` (`50%`), and `Placed` (`Day 10`). `Food stored`, `Funds`, `Upkeep` and `Residents in range` are all hidden until it opens, since each of them is 0 or a lie. After it opens the panel is exactly what section 1 already specifies, and the existing `Built · Day N` row keeps using `builtOnDay`, which stays the day it was **placed**.
+- **Actions** — the mode picker still shows for farm/workshop/dock, annotated `takes effect when it opens`. Demolish is labelled **Cancel construction**, and its confirmation says the money is not refunded.
+- **Placement ghost** — unchanged, except that the service-reach preview is captioned with the wait: `Reach when it opens, in 3 days`. The player needs to know the ring is a promise, not a fact.
+
+### 7.9 Events and the gazette
+
+`buildingConstructed` currently fires at **placement**, which makes section 3's headline for it ("A new {building} opens in {district}") untrue. Split it:
+
+| Event | When | Headline |
+|---|---|---|
+| `buildingSiteStarted` (**new** `EventKind`) | at placement, `magnitude` = build cost | "Ground is broken for a new {building} in {district}" |
+| `buildingConstructed` (existing) | the day it reaches `complete` | "A new {building} opens in {district}" — the section 3 template, now accurate |
+
+Both are routine/good news, so the gazette folds them into the bottom line of a quiet day and gives the opening a green tick. The section 3 headline table carries both rows; nothing else there changes.
+
+The **placement commission** (`AgendaKind.buildingCommission`, "run it hard / clean / steady") still fires at placement — the choice belongs to the act of choosing the spot. But its expiry must become `max(advisoryExpiryDays, required + 2)` days. With `advisoryExpiryDays` at 4 and a dock at 4 days, the question would otherwise expire on the morning the dock opens, which reads as the game forgetting it asked.
+
+Optional, and worth it if advisories start feeling unfair: a `CauseKind.underConstruction` so a coverage advisory can say "the market in Harbor opens in 2 days" instead of flatly reporting no market in range.
+
+### 7.10 Core changes this needs (flagged for Game Logic)
+
+**New types and fields**
+
+- `ConstructionStage: UInt8, Codable, Sendable, CaseIterable` — `foundation = 0, scaffold = 1, complete = 2`.
+- `Building.constructionDaysDone: Int32 = 0` and `Building.constructionDaysRequired: Int32 = 0`. Both stored. `required == 0` means complete, so a decoded building with neither field set reads as finished.
+- Derived on `Building` (computed, not stored): `stage`, `isUnderConstruction`, `isOperational`, `constructionProgress: Double`, `stageProgress`, `opensOnDay`. The stage split needs `BalanceConfig`, so these take the config (or live on an extension that is handed it) rather than guessing.
+- `BalanceConfig`: `constructionDaysByKind: [Int32]` (9 entries, dense, indexed by `BuildingKind.rawValue`), `constructionDaysMultiplierPercent: Int32 = 100`, `constructionFoundationPercent: Int32 = 33`.
+- `EventKind.buildingSiteStarted`.
+- `BuildingInspectCatalog.BuildingProblem.underConstruction`, first in `problemPriority`, plus `InspectTone.progress`.
+- `RepublicState.schemaVersion` **2 → 3**. Per the saved-data rule a schema 2 file does not decode, the app keeps it, and play is blocked until **Start New City**. No migration.
+
+**Tick order.** One new step, at the **top** of `advance`, before the `fields.dirty` check:
+
+```
+0. advanceConstruction        // new
+1. rebuildSpatialCaches       // when fields.dirty
+2. assignWork -> produce -> distributeFood -> payWages
+   ...unchanged
+```
+
+`advanceConstruction` walks buildings in **ascending `BuildingID`**, increments `constructionDaysDone` for each unfinished one, emits `buildingConstructed` for each that reaches `required`, and calls `fields.markDirty()` if any finished. It must run before the dirty check so that a building completing on day N is a service source *that same day* — otherwise a market opens and still feeds nobody for a day, which is a bug the player can see.
+
+**Every other step skips unfinished buildings.** Each of these needs the guard, and the list is the review checklist:
+
+- `assignWork` — a site has no openings
+- `produce`, `distributeFood` (farm lots and market stalls), `spoil`
+- `payWages`, `collectTaxes`, `payUpkeep`
+- `DistanceFields.rebuild` — not a source for any `ServiceKind`; `nearestMarket` likewise
+- `WorldGenerator.freeHouse` and anything that assigns a `home`
+- `BuildingInspector` — see 7.8
+
+**`WorldGenerator.construct` is shared by worldgen and placement.** Worldgen buildings must come out **complete** (`required = 0`), or a new city starts frozen with no homes, no market and no town hall. Give `construct` an explicit parameter rather than letting the default decide it.
+
+### 7.11 Invariants this must not break
+
+- **Determinism.** Construction draws **zero** RNG. Build time is a pure function of kind and config — no jitter, no weather delays. Nothing shifts the `state.rng` stream, so the per-system streams in 4.7 stay aligned and `DeterminismTests` is unaffected by construction existing.
+- **Money is conserved.** The only money movement is the existing `treasury → external` build cost at placement. Skipping upkeep and wages removes movements; it never creates one. No new ledger term, no refund path.
+- **Food is accounted.** A site holds no food and is excluded from production, shipping and spoilage, so `produced + imported − consumed − spoiled − exported` is untouched.
+- **Balance is data.** All three knobs live in `BalanceConfig` and serialise with the seed.
+- **Save shape.** Two `Int32`s per building. No dictionary, no `Double`, no optional struct — `stateHash()` stays canonical.
+- **The clock.** Construction does not block `advance`, and it never adds to `blocksAdvance`. Only crises and elections stop time.
+- **Core stays renderer-free.** Stages are data on `Building`; every sprite, fade and pop in 7.6 and 7.7 lives in the app target.
+
+### 7.12 How to tell it works (for QA and the core tests)
+
+New tests worth having:
+
+1. A clinic placed on day 10 is `foundation` at 0 days, `scaffold` at 2, `complete` at 4, and `constructionProgress` walks 0.0 → 0.25 → 0.5 → 0.75 → 1.0.
+2. A market under construction is **not** in range of anyone: a house one tile from a brand-new market stays unserved until the market opens, and is served the same day it opens.
+3. A site pays no upkeep and earns no wages: treasury movement across a tick with one site and nothing else equals the no-site case.
+4. `checkConservation()` and `Ledger.expectedFoodTotal` hold across placement, the whole construction window, completion, and a cancel-mid-build.
+5. Same seed and same intents still produce the same `stateHash()` after 500 days (`DeterminismTests`, unchanged assertions).
+6. `constructionDaysMultiplierPercent = 0` reproduces today's behaviour exactly, which is the switch that keeps unrelated tests honest about what they are testing.
+7. Worldgen buildings are all `complete` on day 0, and a fresh city has housed citizens and a working market without advancing.
+
+Existing tests that place a building and expect it to work immediately will need either a few `advance` calls or `constructionDaysMultiplierPercent = 0`. From a read of the suite, the placement tests in `FootprintTests` and `SpatialTests` assert on rejection reasons, occupancy and treasury (all at placement, so unaffected), and `AgendaTests.testPlacingWorksRaisesARunHardOrCleanChoiceAtThatSite` asserts the commission at placement (also unaffected). `HungerTests` reads from day 40 onward and only uses worldgen buildings, so it should stay green. That is a prediction from reading the code, not a measurement — Game Logic should re-run the suite and report the real numbers.
+
+### 7.13 Deferred
+
+- **Builders as real citizens.** A construction job that employs labourers, with build time depending on how many turn up, is a much better simulation and a much bigger change (a new `Occupation`, a job site in `assignWork`, wages from the treasury). Not in v1. The builders on screen are decoration until then.
+- **Material costs.** No timber or stone resource. The build cost is money only.
+- **Partial refunds.** `demolishRefundPercent` is named in 7.5 and defaults to 0; add it only if playtests show cancelling is a trap.
+- **Upgrade and repair.** Reusing the stage machinery for levelling a building up, or for repairing one damaged by the hurricane event (5.2, event 1, `disableBuildingDays`), is the obvious second use. Spec it when that event lands, not now.
+- **Rotation** stays deferred, as in section 1.
