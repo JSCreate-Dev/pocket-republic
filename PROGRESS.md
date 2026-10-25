@@ -32,7 +32,7 @@ CI uploads an unsigned device IPA for sideloading. `.github/workflows/unsigned-i
 
 ### Unverified
 
-The pull-request run for this merge is not finished yet. The workflow builds a generic `iphoneos` app and does not boot the Duo simulator. `macos-latest` / `macos-26` still stop at Xcode 26.6, so they cannot compile `reservedRegions`.
+The workflow builds a generic `iphoneos` app and does not boot the Duo simulator. `macos-latest` / `macos-26` still stop at Xcode 26.6, so they cannot compile `reservedRegions`.
 
 The Xcode project still says `CreatedOnToolsVersion = 15.0` and `LastUpgradeCheck = 1500`. Jordan's iPhone playtest is recorded below. Which binary that was is not in the repo. Later test builds should sideload the unsigned IPA from the main or pull-request run.
 
@@ -122,11 +122,17 @@ The core PR merges first.
 
 ## Log
 
+### 2026-10-25 11:34 AM EDT — Ios Dev — `cursor/ci-ipa-bundle-id-71ac` (PR #5)
+
+- **Changed:** No product code. Recorded the post-merge CI result in this log.
+- **Verified:** Push run [40207372598](https://github.com/JSCreate-Dev/pocket-republic/actions/runs/40207372598) on `21da51c` succeeded on `xcode-27` with Xcode 27.1 (`27A9275`). It uploaded `PocketRepublic-unsigned-ipa` (415,372 bytes). The IPA's `CFBundleIdentifier` is `com.jscreate.pocketrepublic`, `DTSDKName` is `iphoneos27.1`, and the minimum OS is 17.0. The signed upload was skipped because the four optional signing secrets are unset. That unsigned file is the sideload test build.
+- **Next:** Optional signing still needs `APPLE_CERTIFICATE_P12_BASE64`, `APPLE_CERTIFICATE_PASSWORD`, `APPLE_PROVISIONING_PROFILE_BASE64`, and `APPLE_TEAM_ID` only if a signed IPA is wanted. Game Logic's footprint-core PR still merges before ghost preview, footprint rendering, and the inspect panel.
+
 ### 2026-10-25 11:28 AM EDT — Ios Dev — `cursor/ci-ipa-bundle-id-71ac` (PR #5)
 
 - **Changed:** Merged `origin/main` (`b960f52`, PR #3) into this branch. Kept the shared `PROGRESS.md` and put this entry at the top of the log. Replaced bundle id `com.example.PocketRepublic` with `com.jscreate.pocketrepublic`, defined only in `Config/PocketRepublic.xcconfig`. The unsigned IPA is the sideload artifact for test builds. The workflow uploads `PocketRepublic-unsigned-ipa` on every push, including each merge to `main`, and on pull requests. Signing secrets stay optional and only add `PocketRepublic-signed-ipa` when all four are set.
 - **Verified:** Run `40206715750` on the pre-merge commit succeeded on `xcode-27` with Xcode 27.1 (`27A9275`). The artifact is an `iphoneos27.1` IPA whose `CFBundleIdentifier` is `com.jscreate.pocketrepublic`. The signed step logged that `APPLE_CERTIFICATE_P12_BASE64`, `APPLE_CERTIFICATE_PASSWORD`, `APPLE_PROVISIONING_PROFILE_BASE64`, and `APPLE_TEAM_ID` are unset, and skipped that upload. Core tests ran in that job (41 tests). No local Swift toolchain here. The main-and-pull-request trigger is in this merge and still needs its own green run.
-- **Next:** Confirm the pull-request run after this merge uploads the unsigned IPA. Optional signing, if wanted later, needs those four secrets plus an Apple Distribution certificate and an Ad Hoc profile for `com.jscreate.pocketrepublic`. Game Logic's footprint-core PR still merges before ghost preview, footprint rendering, and the inspect panel.
+- **Next:** Optional signing, if wanted later, needs those four secrets plus an Apple Distribution certificate and an Ad Hoc profile for `com.jscreate.pocketrepublic`. Game Logic's footprint-core PR still merges before ghost preview, footprint rendering, and the inspect panel. The 11:34 AM entry records the green upload.
 
 ### 2026-10-25 11:25 AM EDT — Docs agent — `cursor/progress-log-d016` (PR #3)
 
