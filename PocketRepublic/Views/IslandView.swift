@@ -2,9 +2,12 @@ import SwiftUI
 import SpriteKit
 import PocketRepublicCore
 
-/// Screen-space controls stay in SwiftUI's safe area; the SpriteKit camera owns only world space.
+/// Screen-space controls use the local scene geometry and Apple's reserved regions.
+/// The SpriteKit world stays behind them and is never part of the saved simulation.
 struct IslandView: View {
     @EnvironmentObject private var game: Game
+    @Environment(\.verticalSizeClass) private var verticalSizeClass
+    @Environment(\.layoutDirection) private var layoutDirection
     @State private var scene = IslandScene(size: CGSize(width: 400, height: 470))
     @State private var tool: CityTool = .inspect
     @State private var selectedTile: TileIndex?
@@ -12,42 +15,28 @@ struct IslandView: View {
 
     var body: some View {
         GeometryReader { geometry in
-            let budget = DecisionCardBudget(sceneSize: geometry.size)
-            ZStack {
+            let layout = CityDisplayLayout(geometry: geometry,
+                                           verticalSizeClass: verticalSizeClass,
+                                           layoutDirection: layoutDirection)
+            ZStack(alignment: .topLeading) {
                 SpriteView(scene: scene)
                     .background(Color(red: 0.05, green: 0.22, blue: 0.37))
 
-                VStack(spacing: 8) {
-                    if game.state.pending == nil && selectedAgenda == nil {
-                        agendaPreviews(budget: budget)
-                    }
-                    Spacer(minLength: 0)
-                    if let pending = game.state.pending {
-                        crisisCard(pending, budget: budget)
-                    } else if let item = selectedAgenda {
-                        agendaCard(item, budget: budget)
-                    } else {
-                        if let selectedTile {
-                            let x = game.state.map.x(of: selectedTile)
-                            let y = game.state.map.y(of: selectedTile)
-                            Text("Tile \(x), \(y) · \(terrainLabel(at: selectedTile))")
-                                .font(.caption)
-                                .padding(.horizontal, 10)
-                                .padding(.vertical, 5)
-                                .background(.regularMaterial, in: Capsule())
-                        }
-                        toolStrip(compact: budget.compact)
-                    }
-                }
-                .padding(8)
+                controls(in: layout)
+                    .frame(width: layout.controls.width, height: layout.controls.height)
+                    .position(x: layout.controls.midX, y: layout.controls.midY)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .clipShape(RoundedRectangle(cornerRadius: 12))
-        }
-        .onAppear {
-            scene.scaleMode = .resizeFill
-            scene.render(game.state)
-            configureTapHandler()
+            .onAppear {
+                scene.scaleMode = .resizeFill
+                scene.setFraming(layout.framing)
+                scene.render(game.state)
+                configureTapHandler()
+            }
+            .onChange(of: layout.framing) { _, framing in
+                scene.setFraming(framing)
+            }
         }
         .onReceive(game.$state) { state in
             scene.render(state)
@@ -57,34 +46,120 @@ struct IslandView: View {
         }
     }
 
+    @ViewBuilder private func controls(in layout: CityDisplayLayout) -> some View {
+        let content = VStack(spacing: 8) {
+            status(in: layout)
+            if game.state.pending == nil && selectedAgenda == nil {
+                agendaPreviews(layout: layout)
+            }
+            if !layout.scrollControls { Spacer(minLength: 0) }
+            if let pending = game.state.pending {
+                crisisCard(pending, layout: layout)
+            } else if let item = selectedAgenda {
+                agendaCard(item, layout: layout)
+            } else {
+                if let selectedTile {
+                    let x = game.state.map.x(of: selectedTile)
+                    let y = game.state.map.y(of: selectedTile)
+                    Text("Tile \(x), \(y) · \(terrainLabel(at: selectedTile))")
+                        .font(.caption)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 5)
+                        .background(.regularMaterial, in: Capsule())
+                }
+                toolStrip(compact: layout.compactTools)
+            }
+            Button { game.advance() } label: {
+                Label("Advance One Day", systemImage: "forward.fill")
+                    .frame(maxWidth: .infinity, minHeight: 44)
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(game.state.blocksAdvance || game.saveIssue != nil)
+        }
+        .padding(.top, layout.occlusionTopInset)
+        .padding(.horizontal, 8)
+        .padding(.bottom, 8)
+
+        if layout.scrollControls {
+            ScrollView(.vertical, showsIndicators: false) { content }
+                .background(.thinMaterial)
+        } else {
+            content
+        }
+    }
+
+    private func status(in layout: CityDisplayLayout) -> some View {
+        VStack(spacing: 5) {
+            HStack {
+                Text("Day \(game.snapshot.day) · \(game.snapshot.population) residents")
+                    .font(.caption.weight(.semibold))
+                Spacer(minLength: 0)
+            }
+            HStack(spacing: 5) {
+                metric("Treasury", "$\(game.snapshot.treasury)")
+                metric("Food", "\(game.snapshot.foodInStores)")
+                metric("Happy", "\(game.snapshot.meanHappiness)%")
+            }
+            if let feedback = game.feedback {
+                Text(feedback).font(.caption).foregroundStyle(.orange)
+                    .lineLimit(layout.scrollControls ? nil : 2)
+            }
+            if let issue = game.saveIssue {
+                Text(issue).font(.caption).foregroundStyle(.red)
+                    .lineLimit(layout.scrollControls ? nil : 3)
+            }
+        }
+        .padding(6)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 10))
+    }
+
+    private func metric(_ title: String, _ value: String) -> some View {
+        VStack(spacing: 2) {
+            Text(value).font(.caption.weight(.semibold))
+                .lineLimit(1).minimumScaleFactor(0.7)
+            Text(title).font(.caption2).foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity)
+    }
+
     private var selectedAgenda: AgendaItem? {
         guard let selectedAgendaID else { return nil }
         return game.state.agenda.first(where: { $0.id == selectedAgendaID })
     }
 
-    private func agendaPreviews(budget: DecisionCardBudget) -> some View {
-        HStack(alignment: .top, spacing: 8) {
-            ForEach(Array(game.state.agenda.prefix(budget.visibleCards))) { item in
-                Button {
-                    selectedAgendaID = item.id
-                } label: {
-                    HStack(spacing: 6) {
-                        Image(systemName: "text.bubble.fill")
-                        Text(item.kind.cityTitle).lineLimit(1)
-                        Image(systemName: "chevron.right").font(.caption2)
-                    }
-                    .font(.caption.weight(.semibold))
-                    .frame(maxWidth: .infinity, minHeight: 36)
+    @ViewBuilder private func agendaPreviews(layout: CityDisplayLayout) -> some View {
+        if layout.stackedPreviews {
+            VStack(spacing: 5) {
+                ForEach(Array(game.state.agenda.prefix(layout.visibleCards))) { item in
+                    previewButton(item)
                 }
-                .buttonStyle(.borderedProminent)
-                .tint(.indigo)
             }
-            Spacer(minLength: 0)
+        } else {
+            HStack(spacing: 5) {
+                ForEach(Array(game.state.agenda.prefix(layout.visibleCards))) { item in
+                    previewButton(item)
+                }
+            }
         }
-        .accessibilityLabel("City decisions")
     }
 
-    private func crisisCard(_ pending: PendingDecision, budget: DecisionCardBudget) -> some View {
+    private func previewButton(_ item: AgendaItem) -> some View {
+        Button {
+            selectedAgendaID = item.id
+        } label: {
+            HStack(spacing: 5) {
+                Image(systemName: "text.bubble.fill")
+                Text(item.kind.cityTitle).lineLimit(1)
+                Image(systemName: "chevron.right").font(.caption2)
+            }
+            .font(.caption.weight(.semibold))
+            .frame(maxWidth: .infinity, minHeight: 36)
+        }
+        .buttonStyle(.borderedProminent)
+        .tint(.indigo)
+    }
+
+    private func crisisCard(_ pending: PendingDecision, layout: CityDisplayLayout) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             Label("City crisis", systemImage: "exclamationmark.triangle.fill")
                 .font(.headline)
@@ -102,22 +177,21 @@ struct IslandView: View {
                         Button {
                             game.send(.resolveDecision(pending.id, option: option.id))
                         } label: {
-                            Text(option.label)
-                                .frame(maxWidth: .infinity, minHeight: 44)
+                            Text(option.label).frame(maxWidth: .infinity, minHeight: 44)
                         }
                         .buttonStyle(.borderedProminent)
                     }
                 }
             }
-            .frame(maxHeight: budget.optionListHeight)
+            .frame(maxHeight: layout.optionListHeight)
         }
-        .frame(maxWidth: budget.cardWidth, alignment: .leading)
+        .frame(maxWidth: layout.cardWidth, alignment: .leading)
         .padding(12)
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14))
         .accessibilityElement(children: .contain)
     }
 
-    private func agendaCard(_ item: AgendaItem, budget: DecisionCardBudget) -> some View {
+    private func agendaCard(_ item: AgendaItem, layout: CityDisplayLayout) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
                 Text(item.kind.cityTitle).font(.headline)
@@ -137,16 +211,15 @@ struct IslandView: View {
                             game.send(.resolveAgendaItem(item.id, option: option.id))
                             selectedAgendaID = nil
                         } label: {
-                            Text(option.label)
-                                .frame(maxWidth: .infinity, minHeight: 44)
+                            Text(option.label).frame(maxWidth: .infinity, minHeight: 44)
                         }
                         .buttonStyle(.borderedProminent)
                     }
                 }
             }
-            .frame(maxHeight: budget.optionListHeight)
+            .frame(maxHeight: layout.optionListHeight)
         }
-        .frame(maxWidth: budget.cardWidth, alignment: .leading)
+        .frame(maxWidth: layout.cardWidth, alignment: .leading)
         .padding(12)
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14))
         .accessibilityElement(children: .contain)
@@ -220,22 +293,106 @@ struct IslandView: View {
     }
 }
 
-/// Geometry is measured inside the NavigationStack/TabView safe area. No fixed Duo inset
-/// is valid across the two displays, fold positions, rotation, and system UI changes.
-private struct DecisionCardBudget {
-    let compact: Bool
-    let visibleCards: Int
-    let visibleOptionRows: Int
-    let cardWidth: CGFloat
+/// Uses the offered safe-area bounds, then the fold's active reserved region when present.
+/// A partial book fold gets a right/left control pane; a laptop fold gets a lower pane.
+/// Tent posture on the outer display is an ordinary compact-height landscape layout.
+private struct CityDisplayLayout {
+    enum Mode { case singlePortrait, singleLandscape, innerFlat, bookFold, laptopFold }
+    let mode: Mode
+    let size: CGSize
+    let focus: CGRect
+    let controls: CGRect
+    let occlusionTopInset: CGFloat
 
-    init(sceneSize: CGSize) {
-        compact = sceneSize.width < 580 || sceneSize.height < 500
-        visibleCards = compact ? 1 : 2
-        visibleOptionRows = compact ? 2 : 3
-        cardWidth = max(0, min(sceneSize.width - 40, compact ? 400 : 360))
+    init(geometry: GeometryProxy, verticalSizeClass: UserInterfaceSizeClass?,
+         layoutDirection: LayoutDirection) {
+        let size = geometry.size
+        self.size = size
+        let bounds = CGRect(origin: .zero, size: size)
+        var division: CGRect?
+        if #available(iOS 27.1, *) {
+            division = geometry.reservedRegions(kind: .division)
+                .map(\.frame)
+                .filter { $0.intersects(bounds) }
+                .max(by: { $0.width * $0.height < $1.width * $1.height })
+        }
+        if let seam = division?.intersection(bounds), !seam.isNull,
+           seam.width > 0, seam.height > 0 {
+            if seam.height >= seam.width {
+                let left = CGRect(x: 0, y: 0, width: max(0, seam.minX), height: size.height)
+                let right = CGRect(x: seam.maxX, y: 0,
+                                   width: max(0, size.width - seam.maxX), height: size.height)
+                mode = .bookFold
+                if layoutDirection == .rightToLeft {
+                    controls = left.width >= 180 ? left : right
+                    focus = left.width >= 180 ? right : left
+                } else {
+                    controls = right.width >= 180 ? right : left
+                    focus = right.width >= 180 ? left : right
+                }
+            } else {
+                mode = .laptopFold
+                focus = CGRect(x: 0, y: 0, width: size.width, height: max(0, seam.minY))
+                controls = CGRect(x: 0, y: seam.maxY, width: size.width,
+                                  height: max(0, size.height - seam.maxY))
+            }
+        } else if verticalSizeClass == .compact && size.width > size.height {
+            mode = .singleLandscape
+            let railWidth = min(300, max(220, size.width * 0.36))
+            focus = CGRect(x: 0, y: 0, width: size.width - railWidth, height: size.height)
+            controls = CGRect(x: size.width - railWidth, y: 0,
+                              width: railWidth, height: size.height)
+        } else if size.width >= 580 && size.height >= 500 {
+            mode = .innerFlat
+            let railWidth = min(380, size.width * 0.42)
+            focus = CGRect(x: 0, y: 0, width: size.width - railWidth, height: size.height)
+            controls = CGRect(x: size.width - railWidth, y: 0,
+                              width: railWidth, height: size.height)
+        } else {
+            mode = .singlePortrait
+            focus = bounds
+            controls = bounds
+        }
+        // Standard containers handle safe areas. This extra check protects our
+        // manually positioned panel from an active camera occlusion inside them.
+        if #available(iOS 27.1, *) {
+            occlusionTopInset = geometry.reservedRegions(kind: .occlusion)
+                .map(\.frame)
+                .filter { $0.intersects(controls) && $0.minY <= controls.minY + 80 }
+                .map { max(0, $0.maxY - controls.minY) }
+                .max() ?? 0
+        } else {
+            occlusionTopInset = 0
+        }
     }
 
-    var optionListHeight: CGFloat { CGFloat(visibleOptionRows) * 52 }
+    var visibleCards: Int {
+        switch mode {
+        case .innerFlat, .bookFold, .laptopFold: return 2
+        case .singlePortrait, .singleLandscape: return 1
+        }
+    }
+    var stackedPreviews: Bool { controls.width < 500 }
+    var compactTools: Bool { mode != .laptopFold }
+    var scrollControls: Bool {
+        mode == .singleLandscape || mode == .laptopFold || controls.height - occlusionTopInset < 360
+    }
+    var cardWidth: CGFloat { max(0, min(controls.width - 36, 360)) }
+    var optionListHeight: CGFloat {
+        let rows: CGFloat = scrollControls ? 2 : (mode == .singlePortrait ? 2 : 3)
+        return rows * 52
+    }
+    var framing: CameraFraming {
+        let tiles: CGFloat
+        switch mode {
+        case .singlePortrait: tiles = 9
+        case .singleLandscape: tiles = 8
+        case .innerFlat: tiles = 12
+        case .bookFold: tiles = 8
+        case .laptopFold: tiles = 12
+        }
+        return CameraFraming(viewSize: size, focusRect: focus, tileWidths: tiles)
+    }
 }
 
 private enum CityTool: String, CaseIterable, Identifiable {

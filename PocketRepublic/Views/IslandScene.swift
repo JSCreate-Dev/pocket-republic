@@ -22,6 +22,7 @@ final class IslandScene: SKScene {
     private var visibleRect: TileRect?
     private var cameraInitialized = false
     private var cameraUserAdjusted = false
+    private var framing: CameraFraming?
     private var touchStart: CGPoint?
     private var wasDragged = false
 
@@ -60,6 +61,33 @@ final class IslandScene: SKScene {
         refreshVisible(force: true)
     }
 
+    /// Keeps the same world point in the usable pane when the fold or orientation changes.
+    func setFraming(_ next: CameraFraming) {
+        guard framing != next else { return }
+        let previous = framing
+        let oldScale = cameraNode.xScale
+        let worldAtFocus: CGPoint?
+        if cameraInitialized, let previous {
+            let oldX = previous.focusRect.midX - previous.viewSize.width / 2
+            let oldY = previous.focusRect.midY - previous.viewSize.height / 2
+            worldAtFocus = CGPoint(x: cameraNode.position.x + oldX * oldScale,
+                                   y: cameraNode.position.y - oldY * oldScale)
+        } else {
+            worldAtFocus = nil
+        }
+        framing = next
+        if cameraInitialized {
+            if !cameraUserAdjusted { applyDefaultZoom() }
+            if let worldAtFocus {
+                let newX = next.focusRect.midX - next.viewSize.width / 2
+                let newY = next.focusRect.midY - next.viewSize.height / 2
+                cameraNode.position = CGPoint(x: worldAtFocus.x - newX * cameraNode.xScale,
+                                              y: worldAtFocus.y + newY * cameraNode.yScale)
+            }
+            refreshVisible(force: true)
+        }
+    }
+
     func render(_ state: RepublicState) {
         if let old = renderedState,
            old.map.road != state.map.road || old.map.buildingAt != state.map.buildingAt {
@@ -68,19 +96,27 @@ final class IslandScene: SKScene {
         renderedState = state
         if !cameraInitialized {
             let middle = state.map.width / 2
-            cameraNode.position = point(x: middle, y: middle)
+            let worldCenter = point(x: middle, y: middle)
             applyDefaultZoom()
+            if let framing {
+                let x = framing.focusRect.midX - framing.viewSize.width / 2
+                let y = framing.focusRect.midY - framing.viewSize.height / 2
+                cameraNode.position = CGPoint(x: worldCenter.x - x * cameraNode.xScale,
+                                              y: worldCenter.y + y * cameraNode.yScale)
+            } else {
+                cameraNode.position = worldCenter
+            }
             cameraInitialized = true
         }
         refreshVisible(force: true)
     }
 
-    /// About nine tile widths on the outer display and fourteen on the inner one.
-    /// `size` is the actual safe-area scene size, including any Duo compatibility bounds.
+    /// Default scale uses the usable world pane, never the full width across a fold.
     private func applyDefaultZoom() {
-        guard size.width > 0 else { return }
-        let tilesAcross: CGFloat = size.width >= 580 && size.height >= 500 ? 14 : 9
-        cameraNode.setScale(max(0.55, min(2.6, tilesAcross * halfWidth * 2 / size.width)))
+        let usableWidth = framing?.focusRect.width ?? size.width
+        guard usableWidth > 0 else { return }
+        let tilesAcross = framing?.tileWidths ?? 9
+        cameraNode.setScale(max(0.55, min(2.6, tilesAcross * halfWidth * 2 / usableWidth)))
     }
 
     private func point(x: Int32, y: Int32) -> CGPoint {
@@ -343,6 +379,12 @@ final class IslandScene: SKScene {
               let tile = tile(at: touch.location(in: self), in: state.map) else { return }
         onTileTap?(tile)
     }
+}
+
+struct CameraFraming: Equatable {
+    let viewSize: CGSize
+    let focusRect: CGRect
+    let tileWidths: CGFloat
 }
 
 private struct RouteKey: Hashable { let from: Int32; let to: Int32 }

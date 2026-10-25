@@ -26,50 +26,9 @@ struct MainView: View {
 
     private var island: some View {
         NavigationStack {
-            GeometryReader { geometry in
-                let compact = geometry.size.width < 580
-                VStack(alignment: .leading, spacing: compact ? 5 : 8) {
-                    Text("Day \(game.snapshot.day) · \(game.snapshot.population) residents")
-                        .font(.subheadline).foregroundStyle(.secondary)
-                    IslandView()
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .clipShape(RoundedRectangle(cornerRadius: 16))
-                    if !compact {
-                        Text("Drag to pan · pinch to zoom · choose a tool, then tap a tile")
-                            .font(.caption).foregroundStyle(.secondary)
-                    }
-                    if let feedback = game.feedback {
-                        Text(feedback).font(.callout).foregroundStyle(.orange)
-                    }
-                    if let issue = game.saveIssue {
-                        Text(issue).font(.callout).foregroundStyle(.red)
-                    }
-                    HStack {
-                        metric("Treasury", "$\(game.snapshot.treasury)")
-                        metric("Food", "\(game.snapshot.foodInStores)")
-                        metric("Happiness", "\(game.snapshot.meanHappiness)%")
-                    }
-                    Button { game.advance() } label: {
-                        Label("Advance One Day", systemImage: "forward.fill")
-                            .frame(maxWidth: .infinity).padding(.vertical, 8)
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(game.state.blocksAdvance || game.saveIssue != nil)
-                }
-                .padding(compact ? 6 : 10)
-            }
-            .navigationTitle("Pocket Republic")
+            IslandView()
+                .navigationTitle("Pocket Republic")
         }
-    }
-
-    private func metric(_ title: String, _ value: String) -> some View {
-        VStack(spacing: 3) {
-            Text(value).font(.headline).lineLimit(1).minimumScaleFactor(0.7)
-            Text(title).font(.caption2).foregroundStyle(.secondary)
-        }
-        .frame(maxWidth: .infinity)
-        .padding(8)
-        .background(.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
     }
 
     private var people: some View {
