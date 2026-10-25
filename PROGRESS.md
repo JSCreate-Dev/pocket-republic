@@ -1,82 +1,70 @@
 # PROGRESS.md
 
-Living handoff for Pocket Republic. Overwrite **Current state** on every change. New pull requests record their log in `docs/log/YYYY-MM-DD-<short-branch>.md` instead of adding to the **Log** below (see AGENTS.md). Entries already in that log stay, newest first. The **North star** is the bar every pull request is judged against.
+Living handoff for Pocket Republic. Read this file before changing anything. **Current state** is the tree on main today. Overwrite that section when the tree changes. The **Log** is history. It now includes every note from `docs/log/` through this handoff, newest first, and the entries that were already here. Those files stay on disk. A log note describes the branch at the time it was written, so an older note can disagree with **Current state**. **Current state** wins.
+
+Later pull requests still write `docs/log/YYYY-MM-DD-<short-branch>.md` and do not add a heading to the **Log**. After this handoff, also read any `docs/log/` file newer than `docs/log/2026-10-25-handoff.md`. The **North star** is the bar every pull request is judged against.
 
 ## North star
 
 Jordan wants Pocket Republic to feel like a lively, living world with a real game feel, not a spreadsheet sim. Every screen is optimized for the iPhone Duo folding display, both folded and unfolded.
 
-[docs/DESIGN.md](docs/DESIGN.md) is the source of truth for footprint sizes, placement rules, inspect-panel contents, sprite sizing, the concrete game-feel targets (including the Duo postures: map and panel side by side when unfolded, a bottom sheet when folded), and section 3 (decree cards and the newspaper-style event feed). Implementation ownership is the locked split in Current state below.
+[docs/DESIGN.md](docs/DESIGN.md) is the source of truth for footprint sizes, placement rules, inspect-panel contents, sprite sizing, the concrete game-feel targets (including the Duo postures: map and panel side by side when unfolded, a bottom sheet when folded), and section 3 (decree cards and the newspaper-style event feed). Sections 4–6 are the citizen-mind, random-event, and on-device model spec. What to build next, and who owns it, is **Next round** and **Team and process** below.
 
 ## Current state
 
-Snapshot of `cursor/building-inspect-panel-ef49` (PR #7) after merging main `3b88a5c` (PR #1, art direction v1 and the app icon, on top of `b960f52`). `swift test` in `PocketRepublicCore` passed 51 tests on Swift 6.2 (Linux, debug). This environment has no iOS SDK, so the inspect panel and the asset catalog were not run on a simulator or a phone. New work logs go in `docs/log/`; the entries below stay.
+Snapshot of main `46abf5e` on 25 October 2026. That commit is PR #6, art batch 2. Main also contains merged PRs #1 through #9 and #11 through #15. PR #10, the diorama HUD, decree cards, and the gazette, is open and its commits are not in this tree. PR #13 merged into the hunger-fix branch after that branch had already been squash-merged, so those walker files never arrived on main. PR #15 re-landed them.
 
-### What works
+`PocketRepublicCore` contains **71** `func test` methods. PR #15 reported `swift test` on Swift 6.2 (Linux): 71 tests, 0 failures. This handoff counted the methods in the tree. It did not re-run the suite, and it did not build the iOS app. [PocketRepublicCore/README.md](PocketRepublicCore/README.md) still says 40 tests, and it still says `HungerTests` locks zero hunger. Both lines are behind main. The release timings in that README (about 0.52 ms/tick at 1000 citizens) were not re-measured here.
 
-The repo is a SwiftUI app plus a SpriteKit island, with the simulation in the pure-Swift package `PocketRepublicCore` (tools version 6.0, iOS 17 / macOS 14). The core sources import Foundation only. The app sends `PlayerIntent` values into `SimulationEngine` and draws a read-only `WorldSnapshot`. The clock advances only when **Advance One Day** is pressed. Animated walkers and the day/night wash do not write simulation state.
+The repo is a SwiftUI app plus a SpriteKit island. The simulation is the pure-Swift package `PocketRepublicCore` (tools version 6.0, deployment target iOS 17). The core sources import Foundation only. The app sends `PlayerIntent` values into `SimulationEngine` and draws a read-only `WorldSnapshot`. The clock advances only when **Advance One Day** is pressed. Animated walkers and the day/night wash do not write simulation state. Core rules for determinism, money, food, crises, tick order, balance data, and saves are in [AGENTS.md](AGENTS.md) and [PocketRepublicCore/README.md](PocketRepublicCore/README.md). Follow those. Do not re-derive them from this summary.
 
-The core has agenda, decrees, and factions. `DecreeCatalogue` is data applied through `RepublicState.apply`. `DecreeSpec` has `name`, `cost`, `salience`, and `effect` (including `favorFactions` / `favorDeltas`). It has no flavor string yet. Factions are `labourers`, `merchants`, `officials`, and `landless`, with membership derived from occupation. Only a crisis (`pending` or a crisis-tier agenda item) blocks the day advance. The island shows crisis and agenda cards; Govern lists agenda items as option buttons and an income-tax stepper; People lists living citizens; Events lists the log newest first, with a prettified `EventKind` title and the first cause's detail. `EventKind` already covers the cases in the design's headline table, and each `GameEvent` can carry `CauseFactor`s, subjects, and a location.
+The core has agenda, decrees, and factions. `DecreeCatalogue` is data applied through `RepublicState.apply`. `DecreeSpec` has `name`, `cost`, `salience`, and `effect`. It has no flavor string. Factions are `labourers`, `merchants`, `officials`, and `landless`. Only a crisis or an election blocks the day advance. The standing agenda does not.
 
-The island scene draws procedural isometric terrain diamonds (64×32), grey roads, and one colored rectangle per building (26×23 pt, town hall 26×32) anchored near the tile. Camera pan and pinch-zoom work. Tools cover inspect, road, house, farm, market, clinic, school, police, workshop, and dock. Inspect is the default. A tap that is not a drag, with Inspect selected, uses the shared isometric hit test and then `WorldMap.buildingAt`. Whichever building occupies that tile is selected, including a footprint tile that is not `Building.tile`. Every occupied tile is highlighted. `BuildingInspectPanel` opens in the controls column. The view sizes to its content and does not present itself as a sheet, so a later layout pass can put the same view in the unfolded side pane or the folded bottom sheet. It shows the kind's display name, type, and district; one status line (no road access, then understaffed, then no food, otherwise "Running well"); workers out of capacity, or for a house the residents out of capacity with each person's hunger and job; food stored on farms and markets; funds; upkeep per day; residents within `maxServiceDistance` for market, clinic, school, and police; and the day built. Farms, workshops, and docks switch `OperatingMode` by sending `PlayerIntent.setOperatingMode` (the placement commission was the only writer of that field before this). Demolish asks for confirmation, then sends the existing `PlayerIntent.demolish`. The Town Hall offers no demolish button. Empty ground or Close clears the selection. Road and building tools still place on tap, and a drag still pans or pinches. A tap on empty ground still shows the `Tile x, y` caption. The design's side-by-side and bottom-sheet hosts, the sprite wiggle, and follow-a-resident are not in this change. Footprint sizes, hunger, and walker routing are unchanged.
+Four tabs: Island, People, Govern, and Events. Govern lists agenda items as option buttons and an income-tax stepper. The navigation title and a form section both say Government. People lists living citizens. Events lists the log newest first, with a prettified `EventKind` title and the first cause's detail. The cause's number is omitted. `EventKind` covers the headline kinds in design section 3, and each `GameEvent` can carry `CauseFactor`s, subjects, and a location. The decree cards and the newspaper feed from that section are the unfinished work in PR #10.
 
-Walkers are cosmetic. Up to 24 employed citizens whose home–work route crosses the viewport are white dots (orange when `daysHungry > 0`). Each dot shuttles along that route on a 20-second loop: 8s out, 2s dwell, 8s back, 2s dwell. Extra yellow dots drift on a sine around every 7th road tile. That matches the Oct 25 playtest note that the dots go back and forth.
+### Multi-tile footprints (PR #12)
 
-Duo layout landed on 2026-10-25 (commits `1c4cdcd` through `1c26ce3`). `CityDisplayLayout` uses iOS 27.1 `reservedRegions` for a vertical book fold (controls on the trailing pane) and a horizontal laptop fold (controls in the lower pane), plus portrait, landscape, and wide flat rails. The target is iPhone-only (`TARGETED_DEVICE_FAMILY = 1`). Deployment target stays iOS 17.0, so pre-27.1 devices skip the reserved-region branches. [docs/DESIGN.md](docs/DESIGN.md) still asks for a stronger split: unfolded map on one pane and inspect/agenda on the other, folded bottom sheet, camera and selection kept across the fold.
+Buildings occupy multi-tile footprints. The anchor is the minimum-x, minimum-y corner, and the footprint extends in +x and +y. Footprints do not rotate. Sizes match the design table: house and police 2×2, market and workshop 3×2, farm, clinic, school, and town hall 3×3, dock 2×3. `WorldMap.tilesCovered`, `buildingAt(_:)`, `isPassable`, and `isEntrance` are the lookups. Roads are passable, and so is each building's entrance. Every other footprint tile blocks movement. `SimulationEngine.validatePlacement` previews a site and does not change state. The entrance is the lowest tile index among perimeter tiles that orthogonally touch a road. The building's district is that entrance's district. Farms need at least half their tiles on fertile land. Docks need one full long side against water. Demolish clears every tile the building still occupies. `RepublicState.schemaVersion` is 2. A schema 1 save does not decode. The file is kept until the player chooses **Start New City**. World generation paints extra 4×4 fertile patches and parks the dock on the east shore.
 
-Saves: a valid city is `Application Support/PocketRepublic/spatial-v1.json` (envelope `formatVersion` 1, checksum `stateHash()`, `RepublicState.schemaVersion` 1), written atomically. A corrupt or unsupported file is kept and blocks play until **Start New City**. The app reads `UserDefaults` key `pocket.republic.save.v1` only to detect the old prototype; it never decodes or migrates it. A new city draws its `worldSeed` once with `UInt64.random` at the app boundary. After that, `worldSeed` and `rng` live in the saved state.
+A new city uses `WorldGenerator.generate`, whose default `size` is 64, so the island is 64×64. [docs/DESIGN.md](docs/DESIGN.md) section 1 says 96×96. Scale tests pass `size: 96` themselves. That gap is map tuning, listed in next round item 7.
 
-The test tree contains **51** `func test` methods (the previous 41, plus `BuildingInspectionTests` for hit-testing, the inspect model, and `setOperatingMode`). [PocketRepublicCore/README.md](PocketRepublicCore/README.md) records a Linux Swift 6.2 pass and says 40 tests, plus release timings (about 0.52 ms/tick at 1000 citizens). This pass re-ran the suite in debug on Swift 6.2 and did not re-measure those release timings. `EconomyReportTests` prints the 200-day dashboard and only asserts that the 250 citizens stay alive.
+### Hunger (PR #11 and PR #14)
 
-CI uploads an unsigned device IPA for sideloading. `.github/workflows/unsigned-ipa.yml` runs on every push, including each merge to `main`, and on pull requests, on the hosted `xcode-27` runner with Xcode 27.1. The artifact is `PocketRepublic-unsigned-ipa` (`PocketRepublic-unsigned.ipa` plus its SHA-256). That file is the test-build deliverable. The bundle id is `com.jscreate.pocketrepublic`, defined only in `Config/PocketRepublic.xcconfig`; Debug and Release both include that file, and generated `Info.plist` takes `CFBundleIdentifier` from it. Optional signing secrets can also upload `PocketRepublic-signed-ipa`. They are not required for a test build.
+The surplus-and-hungry failure is fixed. Farms used to ship a whole day's output to the single nearest market, that market paid for food it could not sell and went broke, and distance was measured on the floor tile instead of the door. `distributeFood` now shares the day's sales: one unit per farm per pass, shopper shortfall first (the food still moves when the till cannot prepay), then paid surplus to markets that can buy without spending wage money. Reach, feeding, coverage, faction tallies, and the no-market penalty all use the door.
 
-### Unverified
+On seed 2026, four households stay hungry because their doors are 21 road tiles from the nearest market, one past `maxServiceDistance` (20). Multi-tile footprints block every tile but the entrance, so that walk is one step longer than when a building was a single passable tile. `HungerTests.testSurplusDoesNotLeaveCitizensHungry` runs seeds 2026 and 11 for 120 days. From day 40 it requires nobody inside the cap to be hungry, and it locks those four as the only exception on seed 2026. Seed 11 must have zero. The city stays in surplus. Those four are tuning for the next round. They are not a return of the distribution bug.
 
-The workflow builds a generic `iphoneos` app and does not boot the Duo simulator. `macos-latest` / `macos-26` still stop at Xcode 26.6, so they cannot compile `reservedRegions`.
+### Tap-to-inspect (PR #7)
 
-The Xcode project still says `CreatedOnToolsVersion = 15.0` and `LastUpgradeCheck = 1500`. Jordan's iPhone playtest is recorded below. Which binary that was is not in the repo. Later test builds should sideload the unsigned IPA from the main or pull-request run.
+Tapping a placed building, with Inspect selected, selects the building that occupies that tile and opens `BuildingInspectPanel` in the island controls column. The panel sizes to its content and does not present itself as a sheet. Copy and field order live in `BuildingInspectCatalog`: status, then staffing, then numbers, then actions. Status priority is no road access, then understaffed, then no food, otherwise "Running well". Houses show residents out of capacity, with each living resident's job and hunger. Farms, workshops, and docks switch `OperatingMode` by sending `PlayerIntent.setOperatingMode`. Demolish asks for confirmation, then sends `PlayerIntent.demolish`. The Town Hall has no demolish button. Every occupied tile is highlighted. A selection haptic fires with the selection. Empty ground or Close clears it. Road and building tools still place on tap. A drag pans, and a pinch zooms. A tap on empty ground still shows the tile caption. The unfolded side pane, the folded bottom sheet, the sprite wiggle, and follow-a-resident are not built.
 
-### Known issues
+### Placement ghost and sprite rendering (PR #9, art from PR #4)
 
-- **Hunger with food surplus.** [PocketRepublicCore/README.md](PocketRepublicCore/README.md) records a 200-day unattended run (the same shape as `EconomyReportTests.testPrintEconomyReport`: seed 2026, 250 citizens, `autoResolve` picking option 0) in which 47 of 250 citizens are hungry (~19%) while production is about 372/day against 250/day needed and about 164/day spoils. The test prints those lines and does not assert them, and this pass did not re-run it. The mechanism in `feedCitizens` matches that diagnosis: a citizen goes hungry when the home tile has no market inside `maxServiceDistance`, the market lacks a full ration, or the citizen cannot pay `foodPrice` (a short payment is refunded). `spoil` then removes `marketSpoilagePercent` of each farm and market store. Supply is in surplus on paper; distribution and affordability leave people hungry.
-- **One-tile buildings, placeholder building art.** `WorldMap.buildingAt` stores one building id per tile. Sprites are flat UIColor blocks; there are no building images. The app icon is `PocketRepublic/Assets.xcassets/AppIcon.appiconset/AppIcon-1024.png` (1024×1024, 8-bit RGB, no alpha), selected with `ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon` on the app target. Style rules are in [docs/ART_DIRECTION.md](docs/ART_DIRECTION.md). The bundle id is `com.jscreate.pocketrepublic` in `Config/PocketRepublic.xcconfig`, not `com.example.PocketRepublic`.
-- **Legacy save left behind.** `pocket.republic.save.v1` is detected and never migrated.
-- **Inspect host is still the controls rail.** The panel view does not present a sheet. The design's unfolded side-by-side pane and folded bottom sheet are not built, and a tap does not wiggle the sprite or follow a resident.
-- **Walkers are a home–work shuttle**, unrelated to entrances or the clock.
-- **Decrees and events read as raw rows.** Agenda options show the label and a bare dismiss. The event list can repeat the same kind and cause on separate rows. [docs/DESIGN.md](docs/DESIGN.md) section 3 is the target presentation. `DecreeSpec` has no `flavor` field yet.
+`CityFootprints.current` is `CoreFootprintModel`. It reads `BuildingKind.footprint`, `tilesCovered`, `buildingAt`, `isEntrance`, and `validatePlacement`. Each building is a sprite anchored at `(0.5, 0)` on the south corner of the tiles it covers. Node size comes from `BuildingSpriteCatalog`, which copies `docs/art/sprites.json`: a house is 128×125, a town hall is 192×222, and every width is (W+H)×32. The image name is `building_<kind>`. Nine imagesets live in `PocketRepublic/Assets.xcassets/Buildings/`. A missing image would draw a placeholder of the same point size. The images are in the catalog, so the island loads them. Market, workshop, and dock (3×2 and 2×3) are still drawn on square bases, so those footprints read slightly off. While a building tool is selected, a ghost of that sprite follows the tile under the finger, tinted green when `validatePlacement` accepts the site and red when it rejects it. The `IntentRejection` sentence shows on the map and in the control pane. Market, clinic, school, and police also draw the tiles within `maxServiceDistance` (20) on the passable network, measured from the entrance `validatePlacement` returns. A rejected placement has no entrance, so it draws no reach. A light impact haptic fires when a building lands, and the ghost hides so the new sprite is not covered by an occupied tint.
 
-### Design on main
+`BuildingArtwork.swift` still comments that `docs/art/sprites.json` is not on main. The file is on main.
 
-[docs/DESIGN.md](docs/DESIGN.md) came in with PR #2 (`dd87c6e`), including section 3. Sections 1–2 specify multi-tile footprints on the 96×96 map:
+### Walker routines (PR #15, the re-land of PR #13)
 
-| Building | Footprint | Extra rule |
-|---|---|---|
-| House | 2×2 | |
-| Police | 2×2 | |
-| Market | 3×2 | |
-| Workshop | 3×2 | |
-| Farm | 3×3 | at least half its tiles fertile |
-| Clinic | 3×3 | |
-| School | 3×3 | |
-| Town Hall | 3×3 | |
-| Dock | 2×3 | one long side touches water |
+`WalkerRoutine.plan` builds a deterministic day. Hours are 0..<24, and a dwell's end hour is exclusive, so the gap before the next dwell is the walk. An employed citizen with a market in range is home from hour 0 until hour 7, at work from hour 8 until hour 15, at the market `shoppingMarket` already uses from hour 16 until hour 18, and home again from hour 20. Someone without a job skips work and shops earlier. A door past `maxServiceDistance` gets no market stop. Hours 0..<24 pick a tile on that walk. Destinations are entrance tiles from `BuildingAccess`. `MapBuildingAccess` records `Building.tile` (the entrance) and forwards `WorldMap.isPassable` and `building(at:)`. `Pathfinder` is a deterministic BFS on that access. The plan is a pure function, so the save and the state hash do not store it. `WalkerRoutineTests` covers the hour schedule, unemployed citizens, a door out of range, entrance tiles from the access interface, and a path around a blocked 3×3 footprint.
 
-Placement in that doc: anchor plus footprint, every covered tile buildable and empty, road-facing entrance, district taken from the entrance tile, only the entrance passable, demolish clears every covered tile, green/red ghost from `IntentRejection`, service buildings preview `maxServiceDistance` (20). Rotation waits. None of `tilesCovered`, a placement-check query, or `isPassable` exist in code yet.
+The island does not sample `DailyRoutine`. It still draws up to 24 employed citizens whose home–work route crosses the viewport. Each one is a dot, white, or orange when `daysHungry > 0`, on a 20-second loop: 8 seconds out, 2 seconds dwell, 8 seconds back, 2 seconds dwell. The path walks `isPassable` tiles between the two entrance tiles. Extra yellow dots drift on every 7th road tile. That is the back-and-forth motion from the Oct 25 playtest. The core routine is what should replace it.
 
-Section 3 specifies the decree card (title, flavor, cost or Free, faction chips, plain-language effects, **Issue decree** / **Not now**) and the newspaper-style event feed (group by kind, district, and day; headline templates; a because-line from `CauseFactor`; names; **Show me**).
+### CI, bundle id, and art
 
-### Art on this branch
+PR #5 is the workflow named **Build iOS IPA** (`.github/workflows/unsigned-ipa.yml`). It runs on the hosted `xcode-27` runner with `DEVELOPER_DIR` set to Xcode 27.1, on every push, including each merge to main, and on fork pull requests. The job runs `swift test --package-path PocketRepublicCore`, then builds an unsigned `iphoneos` app. The test-build artifact is `PocketRepublic-unsigned-ipa`. The bundle id is `com.jscreate.pocketrepublic`, defined only in `Config/PocketRepublic.xcconfig`. Debug and Release both include that file. Optional signing secrets can also upload `PocketRepublic-signed-ipa`. They are not required for a sideload build. This handoff did not wait on a workflow run. The Xcode project still records `CreatedOnToolsVersion = 15.0` and `LastUpgradeCheck = 1500`. The deployment target is iOS 17.0, and `TARGETED_DEVICE_FAMILY` is 1 (iPhone only).
 
-[docs/ART_DIRECTION.md](docs/ART_DIRECTION.md) is v1: a sunny isometric toy-diorama, town hall as the visual anchor, palette, and the app-icon description. The icon file is in the asset catalog. Building sprites are not. Footprint sizes and the 1x sprite base now come from [docs/DESIGN.md](docs/DESIGN.md); the art doc's earlier hold was waiting on that recommendation.
+PR #1 added [docs/ART_DIRECTION.md](docs/ART_DIRECTION.md) and the 1024×1024 app icon (`AppIcon`, 8-bit RGB, no alpha), selected with `ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon`. PR #4 added the nine building sprites and `docs/art/sprites.json`. PR #6 added batch 2 under `PocketRepublic/Assets.xcassets/`: 31 terrain imagesets, 16 road overlays, 14 decorations, 26 walker and cart imagesets, and 7 UI icons (94 imagesets), plus `docs/art/ASSETS.md`, `UI_STYLE.md`, `road_autotile.json`, and `decos.json`. The island does not load that batch. Terrain is still a procedural 64×32 diamond, flat color, or grey when the tile is a road. Walkers on screen are still the dots above.
 
-### Ownership (locked)
+### Duo layout and saves
 
-This split supersedes the shorter handoff line in the 11:17 AM Game Designer log and the one-line "Next" note inside [docs/DESIGN.md](docs/DESIGN.md). The design rules in that doc stay authoritative. Section 3's follow-ups sit with the same roles: Ios Dev builds the decree and event UI, Game Logic adds `flavor` on `DecreeSpec` and keeps a cause on every negative event.
+`CityDisplayLayout` uses iOS 27.1 `reservedRegions` for a vertical book fold (controls on the trailing pane) and a horizontal laptop fold (controls in the lower pane), plus portrait, landscape, and wide flat rails. Pre-27.1 devices skip the reserved-region branches. The design's stronger split, unfolded map on one pane and the panel on the other, folded bottom sheet, camera and selection kept across the fold, is what PR #10 started. It is not on main. A player-facing layout picker is deferred until game feel is optimized.
 
-- **Game Logic** owns the footprint core: sizes, `tilesCovered`, placement rules, entrance tile, district, building-at-tile lookup, placement-check query, and `isPassable`. Game Logic also owns the hunger fix and walker routing. **The core PR merges first.**
-- **Ios Dev** owns the ghost preview, rendering, the inspect panel, and CI, built on Game Logic's core API. Ios Dev also owns the decree-card and event-feed UI from section 3.
-- **Game Designer** owns [docs/DESIGN.md](docs/DESIGN.md).
-- **Visual And Grapchics** owns sprites (sized from the design table) and the app icon.
+A valid city is `Application Support/PocketRepublic/spatial-v1.json` (envelope `formatVersion` 1, checksum `stateHash()`, `RepublicState.schemaVersion` 2), written atomically. A corrupt or unsupported file is kept and blocks play until **Start New City**. The app reads the `UserDefaults` key `pocket.republic.save.v1` only to detect the old prototype. It never decodes or migrates it. A new city draws `worldSeed` once with `UInt64.random` at the app boundary (`Game.freshState`). After that, `worldSeed` and `rng` live in the saved state.
+
+### Spec that is not built
+
+[docs/DESIGN.md](docs/DESIGN.md) sections 4, 5, and 6 are spec only. There is no `CitizenMind` or `Narrator` type in the core. Section 4 is citizen needs, traits, opinion of El Presidente, gossip, and choices with visible causes, plus the seeded-roll contract. Section 5 is a 14-event random deck and rare one-off events. Section 6 is the small on-device model: it may pick among options the core has already validated and write flavor text, the answer used is written into the save, and the rule-based mind is the fallback. The minimum target stays iOS 17.
 
 ## Owner playtest feedback (Oct 25, 2026)
 
@@ -87,40 +75,146 @@ Jordan tested on an iPhone. No art assets were in that build.
 3. Research how building placement and assets work in Cities: Skylines and Tropico. That research is written up in [docs/DESIGN.md](docs/DESIGN.md).
 4. Tapping a placed item should show details about it.
 
-## Open items by role
+Footprints and tap-to-inspect are on main. The dots still shuttle on screen. The daily routine that should replace that shuttle is in the core. The reference-game research is the design doc, including the Tropico work-mode idea that `OperatingMode` already follows. Construction that rises in stages, the next feel target, is next round item 1.
 
-### Ios Dev
+## Known issues
 
-Built on Game Logic's core API, after the core PR merges.
+- **Four households sit one tile past market range.** Seed 2026, 250 citizens: from day 40, four doors are 21 road tiles from the nearest market. `maxServiceDistance` is 20. Everyone inside the cap is fed, and the city has a food surplus. Seed 11 has nobody past the cap. Next round item 7 is the tuning pass. The core README's "zero hunger" line describes the test before PR #14.
+- **Batch 2 art is in the catalog and not on screen.** Building sprites and the placement ghost are drawn. Terrain, roads, decorations, walker sprites, and the UI style sheet are not what the island or the tabs draw. Market, workshop, and dock sprites sit on square bases.
+- **Walkers on screen are still a home–work shuttle.** `WalkerRoutine.plan` already builds home, work, market, and home. `IslandScene` does not read it.
+- **Decrees and events still read as rows.** Agenda options show the label. The event list can repeat the same kind on separate rows and drops `CauseFactor.value`. `DecreeSpec` has no `flavor` field. Some negative events can still omit a cause. PR #10 is the unfinished presentation, and it is parked.
+- **Inspect lives in the controls column.** The unfolded side pane, the folded bottom sheet, the sprite wiggle, and follow-a-resident are not built. The panel view itself can move without a rewrite.
+- **Two save leftovers.** `pocket.republic.save.v1` is detected and never migrated. A spatial file from schema 1 does not decode under schema 2, and the app keeps that file until **Start New City**.
+- **The core README's known-state list is stale** on the test count (it says 40) and on hunger (it says the test locks zero hunger).
+- **A new city is 64×64.** The design doc says 96×96. See next round item 7.
 
-- Ghost preview: green or red, reason from `IntentRejection`, service reach for market, clinic, school, and police.
-- Render footprints from the core sizes and `tilesCovered`, including the sprite base in [docs/DESIGN.md](docs/DESIGN.md). Move the island toward the Duo postures in that doc (unfolded map plus panel, folded bottom sheet, selection and camera kept).
-- Inspect panel contents landed in PR #7 (see the log). Still open: host that same view in the unfolded side pane and the folded bottom sheet, and the inspect wiggle / follow-a-resident moment.
-- Decree cards and the newspaper event feed from section 3: title, flavor, cost or Free, faction chips, plain-language effects, **Issue decree** / **Not now**, and stories grouped by kind, district, and day with a because-line, names, and **Show me**.
+## Open items
 
-### Game Logic
-
-The core PR merges first.
-
-- Footprint core: sizes, `tilesCovered`, placement rules, entrance tile, district from the entrance, building-at-tile lookup, placement-check query, `isPassable` (entrance passable, the rest of the footprint not).
-- Hunger fix for the surplus-and-hungry run above. Cause is market reach, stock at the market, and whether the citizen can pay, with spoilage on top.
-- Walker routing that uses entrances and `isPassable`. Today's dots are the cosmetic shuttle described in Current state.
-- Add a `flavor` string to `DecreeSpec`. Keep a `CauseFactor` on every negative event so the feed's because-line has something to read.
+Finished, and not open: multi-tile footprints (PR #12), the surplus hunger fix (PR #11 and PR #14), tap-to-inspect (PR #7), the placement ghost and building-sprite rendering (PR #9 and PR #4), walker routines in the core (PR #15), the Xcode 27.1 unsigned IPA and bundle id `com.jscreate.pocketrepublic` (PR #5), the nine building imagesets (PR #4), and the batch 2 catalog (PR #6). The ordered work is **Next round**. The role notes here match that list.
 
 ### Game Designer
 
-[docs/DESIGN.md](docs/DESIGN.md) is on main (PR #2, `dd87c6e`), sections 1–3. Follow-up edits stay in that doc when a rule has to change. Implementation ownership lives in this file.
+Write the construction-stage spec and timings (next round 1). [docs/DESIGN.md](docs/DESIGN.md) stays the source of truth, including sections 4–6 when their turn arrives.
+
+### Game Logic
+
+Construction-stage state (next round 1). A `flavor` string on `DecreeSpec`, and a cause on every negative event (next round 3). Citizen minds and the random event deck (next round 4). The on-device model hook on the core side (next round 5). Market range and map tuning, including the four seed-2026 doors and the 64 versus 96 map (next round 7).
 
 ### Visual And Grapchics
 
-- Building sprites sized from the footprint table and sprite-base formula in [docs/DESIGN.md](docs/DESIGN.md), in the style of [docs/ART_DIRECTION.md](docs/ART_DIRECTION.md). The island still draws flat color blocks. Footprint sizes are settled, so this is no longer waiting on the Game Designer recommendation.
-- The app icon is in the catalog (see Known issues). It has not been compiled with `actool`.
+Foundation and scaffold sprites for each footprint size, same (W+H)×32 width and anchor (next round 1). The 3×2 and 2×3 building sprites are still on square bases. That redraw waits behind the construction art.
 
-### Later / backlog
+### Ios Dev
 
-- Player-customizable iPhone Duo layouts (choose what each panel shows, for example map, inspect, agenda, or stats). Owner: Ios Dev. Deferred by Jordan until performance and game feel are optimized.
+Stage rendering and the finished pop, after the spec and the core state exist (next round 1). PR #10, parked (next round 2). When a later presentation pass is already in the island: sample `DailyRoutine`, draw the batch 2 catalog, and add the inspect wiggle and follow-a-resident (next round 6). Batch 2 does not get its own pull request ahead of construction stages. Custom Duo layouts stay deferred (next round 8).
+
+## Next round (priority order)
+
+1. **Tropico-style construction stages.** A placed building rises in real time through foundation, then scaffold with builders, then the finished building with a pop. It does not function while it is under construction. The core stores whole days done and days needed for each stage, and it exposes progress as a number from 0 to 1. Game Designer writes the spec and the timings. Game Logic owns the core state. Visual And Grapchics draws the foundation and scaffold sprites for each footprint size, using the same (W+H)×32 width and the same anchor as the finished sprite. Ios Dev renders the stages and the pop.
+
+2. **PR #10, the diorama HUD, decree cards, and the gazette.** That pull request is unfinished and parked. It is the presentation pass for design section 3: the map-forward Duo layout, decree cards, and the newspaper-style event feed. Leave it parked until the lead picks it up. Do not rebase it onto a side branch.
+
+3. **Decree flavor text, and causes on negative events.** `DecreeSpec` needs a `flavor` string so a card can say what the decree means in the world. Every negative event needs a `CauseFactor` so the feed's because-line has something to read. Game Logic owns both. The card and newspaper UI stay with Ios Dev, inside the parked PR #10 work.
+
+4. **Citizen minds and the random event deck.** [docs/DESIGN.md](docs/DESIGN.md) sections 4 and 5. Needs, traits, opinion, gossip, and choices with visible causes, then the 14-event deck with its triggers, choices, headlines, pacing, and repeat rules. New core fields are flagged in sections 4.6 and 5.5. Rolls stay on seeded streams, one game seed, then a stream per system.
+
+5. **The small on-device LLM hook.** Section 6. The model picks among options the core has already validated, and it writes flavor text. It does not change state, invent options, or change numbers. The core logs the output it used in the save, so a replay reads the log and does not call the model again. A rule-based mind is the fallback when the model is missing, late, or refused. The minimum target stays iOS 17. The model path, when it exists, sits behind iOS 26 availability. Version 1 can ship with only the rule-based implementation.
+
+6. **Ambient life, the inspect wiggle, and follow-a-resident.** People should head home at night and out to work in the morning, which means the island samples `DailyRoutine` instead of the home–work shuttle. Inspecting wiggles the sprite, and tapping a resident follows them for a moment. Drawing the batch 2 terrain, roads, decorations, and walker sprites belongs in this same presentation work. It does not jump the queue ahead of item 1.
+
+7. **Market range and map tuning.** The four seed-2026 households whose doors are 21 tiles from a market, one past the 20-tile cap, are the known remainder. A new city is 64×64, and the design doc says 96×96. Change the cap, the generated roads, or the map size on purpose, and re-read `HungerTests` and the economy dashboard after the change.
+
+8. **Custom iPhone Duo layouts.** Let the player choose what each panel shows, for example map, inspect, agenda, or stats. Owner: Ios Dev. Deferred until game feel is optimized.
+
+## Team and process
+
+**Project Lead** coordinates and merges. **Game Logic** owns the core simulation in `PocketRepublicCore`. **Ios Dev** owns the UI, rendering, and CI. **Visual And Grapchics** owns art. **Game Designer** owns [docs/DESIGN.md](docs/DESIGN.md). One pull request stays inside one role. The core stays free of SwiftUI, SpriteKit, and UIKit.
+
+Merge one pull request at a time, and wait for main's **Build iOS IPA** run to go green before merging the next. Stack pull requests only on main. PR #13 was stacked on the hunger-fix branch, that branch was squash-merged without the walker commits, and the work had to be re-landed as PR #15.
+
+Each pull request writes its note in `docs/log/YYYY-MM-DD-<short-branch>.md` and does not edit the **Log** in this file. It does overwrite **Current state** so the snapshot matches the tree. Leave [FINDINGS.md](FINDINGS.md) as history.
+
+New objects in `project.pbxproj` use a random 24-character hex id. The file still contains an older block of sequential placeholder ids. Leave those in place, and do not copy them for a new file.
+
+Test builds are unsigned IPAs. Download the `PocketRepublic-unsigned-ipa` artifact from the **Build iOS IPA** workflow. Signing secrets are optional and are not required for a sideload build.
+
+Keep cloud agents lean and one-pass. An agent does its one change, opens the pull request, and stops. It does not watch CI. Reserve further usage for the lead's merge and for the unsigned IPA.
 
 ## Log
+
+Folded from `docs/log/` on 25 October 2026, newest landed work first. The notes below the 11:36 AM entry were already in this file and are unchanged. Where a note describes a branch that later moved, **Current state** is the tree on main.
+
+### 2026-10-25 1:25 PM EDT — Visual And Grapchics — `cursor/terrain-roads-walkers-ui-5b58` (PR #6)
+
+Source: `docs/log/2026-10-25-terrain-roads-walkers-ui.md`, stamped 11:34 AM EDT on the branch. Landed as `46abf5e`, the tip of main. The note was written before the footprint, sprite, and walker commits were on that branch, so its "UIColor building blocks" line is the branch at writing time. On main today the island draws building sprites. See **Current state**.
+
+- **Changed:** Added 94 imagesets under `PocketRepublic/Assets.xcassets/` in `Terrain/` (31), `Roads/` (16), `Decorations/` (14), `Walkers/` (26), and `UI/` (7). Each folder sets `provides-namespace` to false, so the names stay `tile_*`, `road_*`, `deco_*`, `walker_*`, `cart_0_*`, and `icon_*`. Docs are in `docs/art/`: `ASSETS.md`, `UI_STYLE.md`, `road_autotile.json`, `decos.json`, `terrain_preview.png`, `ui_style_sheet.png`, and `ui_style_sheet.html`. Generator scripts are in `tools/art/`. The branch was cut from `b960f52` and then merged `origin/main` at `3b88a5c` (PR #1). No Swift edits. `docs/ART_DIRECTION.md` stayed as PR #1 left it.
+- **Verified:** Every imageset PNG is 8-bit RGBA with an alpha channel. Terrain diamonds are opaque inside the tile and transparent in the corners. Every `Contents.json` parses. Tile and road sprites are 64×32 at 1x. The batch is about 2.7 MB. The largest file is `docs/art/terrain_preview.png` at about 1.1 MB. The road bitmask in `docs/art/ASSETS.md` matches `IslandScene.point(x:y:)`: N=1 is `(x, y−1)` up-right, E=2 is `(x+1, y)` down-right, S=4 is `(x, y+1)` down-left, W=8 is `(x−1, y)` up-left. Road assets were not renamed. No Swift toolchain, Xcode, or iPhone, so `swift test`, `actool`, and the device build were not run.
+- **Next (as written then):** Ios Dev wires the art. Pick terrain variants by a deterministic hash of the tile index, draw roads as overlays chosen by the bitmask, use nearest filtering for walkers, flip the other two directions with `xScale = -1`, keep the hungry orange tint, and follow `docs/art/UI_STYLE.md` for the HUD pill, decree cards, the Gazette, citizen rows, and the inspect panel. Known gaps called out in the note: no blending between terrain types, faint roads on sand, mockup fonts substituted for SF Pro Rounded, and the 3×2 and 2×3 building sprites still on square bases (that art is PR #4).
+
+### 2026-10-25 1:09 PM EDT — Game Logic — `cursor/walker-routines-main-68a0` (PR #15)
+
+Source: `docs/log/2026-10-25-walker-routines-main-68a0.md`. Re-land of PR #13 onto main.
+
+- **Changed:** PR #13 never reached main. It was merged into the hunger branch after that branch had already been squash-merged, so `origin/main` never received the walker files. This branch copies only what `1d32878` added on top of its parent `3fdab91`: `WalkerRouting.swift`, `WalkerRoutineTests.swift`, and the original walker log. The hunger diff is not reapplied. The branch is based on `b032bb2` (PR #9), which already includes multi-tile footprints and the round-robin food shipments from PR #14. `Building.tile` is the entrance. `MapBuildingAccess` records that door and forwards `WorldMap.isPassable` and `building(at:)`. The island scene from PR #9 still draws the home–work shuttle, and that shuttle already walks passable tiles between entrance tiles, so the sprite and ghost rendering was left as PR #9 wrote it. Food distribution is untouched.
+- **Verified:** `swift test` in `PocketRepublicCore` (Swift 6.2, Linux): 71 tests, 0 failures. No iPhone run. `PROGRESS.md` was not edited on that branch.
+- **Next:** The scene should sample `DailyRoutine`. That is next round item 6.
+
+### 2026-10-25 12:41 PM EDT — Ios Dev — `cursor/footprint-ghost-render-6511` (PR #9)
+
+Source: `docs/log/2026-10-25-footprint-ghost-render-6511.md`, stamped 11:40 AM EDT. The file still describes `LegacyOneTileFootprintModel` and one building id per tile. That was the branch before it was brought onto the footprint core. The merged pull request, and the tree on main, use `CoreFootprintModel`. See **Current state**.
+
+- **Changed:** Presentation only. Buildings draw as sprites anchored at `(0.5, 0)` on the south corner, sized from the `docs/art/sprites.json` table (house 128×125, town hall 192×222, widths (W+H)×32). The image name is `building_<kind>`, with a same-size placeholder when the imageset is absent. While a building tool is selected, a green or red ghost follows the finger. The `IntentRejection` sentence shows on the map and in the control pane. Market, clinic, school, and police draw tiles within `maxServiceDistance` (20). A light haptic fires when a building lands, and the ghost hides. The branch merged main through `f48dc67` (art direction, then design sections 4–6). Those sections were not implemented. `PROGRESS.md` was not edited.
+- **Verified:** `PocketRepublicCore` was not modified on the early branch. No Swift toolchain and no iPhone, so `swift test` and the device build were not run there. Main was later merged with merge commit `4d24aff` (through `4a7bd36`).
+- **Next (as written then):** Point `CityFootprints.current` at the core API. That swap is what landed. The 3×2 and 2×3 sprites in `sprites.json` are 160 pt wide. The art-direction line that says canvas width is footprint width in tiles × 64 matches (W+H)×32 for squares only.
+
+### 2026-10-25 12:35 PM EDT — Game Logic — `cursor/footprint-hunger-range-68a0` (PR #14)
+
+Source: `docs/log/2026-10-25-footprint-hunger-range-68a0.md`.
+
+- **Changed:** `HungerTests.testSurplusDoesNotLeaveCitizensHungry` failed on main at `4a7bd36` (footprints plus the first hunger fix). Seed 2026 left 22 of 250 hungry. Seed 11 left 16. Food was in surplus. Multi-tile farms shipped a full crew's yield, and `distributeFood` finished one farm, including surplus, before it offered the next farm a sale. The lowest-index farms sold the whole daily budget. Around the twelfth farm every market till was down to the wage reserve, so later farms never sold a unit. Their crews were not paid and could not buy food that was already on the shelf. Farms now take turns: one unit per farm per pass, shortfall first even when the till cannot prepay, then paid surplus. Wage cash stays reserved. A market's door is still its entrance. Seed 2026 still has four households whose door is 21 road tiles from the nearest market. `maxServiceDistance` is 20. Those four are outside the cap on purpose. The test requires nobody inside the cap to be hungry, locks those four as the only exception, and still requires zero on seed 11.
+- **Verified:** `swift test` in `PocketRepublicCore` (Swift 6.2, Linux): 66 tests, 0 failures. No iPhone run. `PROGRESS.md` was not edited.
+- **Next:** The four households are next round item 7.
+
+### 2026-10-25 11:58 AM EDT — Game Logic — `cursor/walker-daily-routines-68a0` (PR #13)
+
+Source: `docs/log/2026-10-25-walker-daily-routines-68a0.md`. This pull request merged into `cursor/hunger-surplus-fix-68a0`, not into main. PR #15 is the copy that landed. The note below is the original branch, including lines that were only true before footprints (it says today's entrance is the building's single tile).
+
+- **Changed:** `WalkerRoutine.plan` builds a day from needs and the clock: home in the morning, work through the middle of the day when the citizen has a job, the market `shoppingMarket` names, then home at night. Hours 0..<24 pick a tile on that walk. Destinations come from `BuildingAccess`. `MapBuildingAccess.isPassable` forwards `WorldMap.isPassable`. `Pathfinder` is a deterministic BFS. The island scene on that branch still animated the home–work shuttle.
+- **Verified:** `WalkerRoutineTests` covers the hour schedule, unemployed citizens, no market stop when the door is out of range, entrance tiles from the access interface, and a path around a blocked 3×3 footprint. `swift test` on Swift 6.2 Linux, after merging the main of that day: 57 tests, 0 failures. No iPhone run. `PROGRESS.md` was not edited.
+- **Next (as written then):** The footprint core should supply the real entrance. The scene should draw `DailyRoutine`. The parent branch was the hunger fix.
+
+### 2026-10-25 11:58 AM EDT — Game Logic — `cursor/hunger-surplus-fix-68a0` (PR #11)
+
+Source: `docs/log/2026-10-25-hunger-surplus-fix-68a0.md`.
+
+- **Changed:** A 120-day unattended city (seed 2026, 250 citizens) left about 47 people hungry while farms produced roughly 372 food a day against 250 needed, and markets held thousands of units. Three mechanisms stacked. Farms shipped their whole output to the single nearest market, so that market hoarded food and others sold out. The oversupplied market paid up front for every unit, including food nobody bought, the till ran dry, and shopkeepers and then farmers went unpaid (about 19 employed people with no coins in front of full shelves). Ten houses sat at road distance 21 because the check used the floor tile, one step inside the door, against `maxServiceDistance` 20. `distributeFood` now fills each market up to a day's demand for the people who shop there, even when the till cannot prepay. Leftover production is sold only to markets that can pay without spending wage money. Reach is measured at the door. Seed 555 no longer raises a crisis once this hunger is gone, so `testCrisisResolutionsDoNotMintMoney` follows seed 314, which still raises district uprisings.
+- **Verified:** `swift test` in `PocketRepublicCore` (Swift 6.2, Linux): 42 tests, 0 failures, on that branch before footprints. `HungerTests` then required zero hunger from day 40 on for seeds 2026 and 11. PR #14 is the later adjustment: four seed-2026 households past the cap, after footprints lengthened the walk. No iPhone run. `PROGRESS.md` was not edited.
+- **Next (as written then):** Walker routines were a separate branch. The footprint core was a different pull request and was meant to merge before the renderer followed the routes.
+
+### 2026-10-25 11:58 AM EDT — Game Logic — `cursor/building-footprints-671d` (PR #12)
+
+Source: `docs/log/2026-10-25-building-footprints-671d.md`.
+
+- **Changed:** Multi-tile footprints in `PocketRepublicCore`. Sizes match `docs/DESIGN.md`. The anchor is the minimum-x, minimum-y corner. There is no rotation. Placement, demolition, snapshots, and saves use the footprint. `isPassable` is true for roads and for each building's entrance only. World generation paints extra fertile 4×4 patches so a farm can meet the half-fertile rule, and parks the dock on the east shore. `RepublicState.schemaVersion` is 2. `BuildingOccupancy.occupant` calls `WorldMap.buildingAt(_:)`.
+- **Verified:** `swift test` in `PocketRepublicCore` on Swift 6.2 (Linux, debug): 65 tests, 0 failures, after merging main `e2aa20c`. One inspect fixture needed the entrance tile marked passable. That test was re-run green. No Xcode project edits on that pull request.
+- **Next (as written then):** Ios Dev can call `validatePlacement` for the ghost and `buildingAt(_:)` for which building covers a tile. That is what PR #9 does on main. Hunger and walker routing were still open when this note was written. Both have since landed (PR #14 and PR #15), with the four-household remainder called out above.
+
+### 2026-10-25 11:39 AM EDT — Game Designer — `design/citizen-minds-and-events` (PR #8)
+
+Source: `docs/log/2026-10-25-design-citizen-minds-and-events.md`. Merged as `f48dc67`.
+
+- **Changed:** Added `docs/DESIGN.md` sections 4 (citizen needs, traits, opinion of El Presidente, gossip, and choices with visible causes) and 5 (a 14-event random deck with triggers, choices, headlines, pacing, and repeat rules). Also added the seeded-roll determinism contract (4.7), a visual cue per citizen choice (4.8), section 6 (the LLM hook: `CitizenMind` and `Narrator`, rule-based v1, ask-ahead so a tick never blocks, a decision log in the save, Foundation Models behind iOS 26 availability with the iOS 17 minimum), the "no two games play the same" principle with per-system seeded streams, and section 5.6 rare one-off events. `PROGRESS.md` was left unchanged on that pull request.
+- **Verified:** Spec only. No code changes. New core fields are flagged in 4.6 and 5.5.
+- **Next:** Sections 4–6 are next round items 4 and 5. They are not implemented on main.
+
+### 2026-10-25 11:38 AM EDT — Ios Dev — `cursor/ci-ipa-bundle-id-71ac` (PR #5)
+
+Source: `docs/log/2026-10-25-ci-ipa-bundle-id.md`. The 11:34 AM and 11:28 AM notes for the same pull request are further down this log.
+
+- **Changed:** Merged `origin/main` (`3b88a5c`, PR #1) with a merge commit. Kept art direction v1, `AppIcon.appiconset`, and `ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon` together with the bundle id in `Config/PocketRepublic.xcconfig` (`com.jscreate.pocketrepublic` on Debug and Release, no inline `PRODUCT_BUNDLE_IDENTIFIER`). Left the existing log entries in place. `AGENTS.md` and the preamble of this file then said future notes go in `docs/log/`.
+- **Verified:** No conflict markers. The app icon and `docs/ART_DIRECTION.md` are in the tree. Prior push run [40207372598](https://github.com/JSCreate-Dev/pocket-republic/actions/runs/40207372598) uploaded `PocketRepublic-unsigned-ipa` with `CFBundleIdentifier` `com.jscreate.pocketrepublic`. No local Swift toolchain and no iPhone on that pass.
+- **Next (as written then):** Optional signing still needs `APPLE_CERTIFICATE_P12_BASE64`, `APPLE_CERTIFICATE_PASSWORD`, `APPLE_PROVISIONING_PROFILE_BASE64`, and `APPLE_TEAM_ID` only if a signed IPA is wanted. The footprint-core pull request this note was waiting on has since merged.
 
 ### 2026-10-25 11:36 AM EDT — Visual And Grapchics — `cursor/building-sprites-v1-5b58` (PR #4)
 
