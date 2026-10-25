@@ -26,13 +26,15 @@ final class IslandScene: SKScene {
     private var framing: CameraFraming?
     private var touchStart: CGPoint?
     private var wasDragged = false
+    private let focusMarker = SKShapeNode()
+    private var pendingReveal: (Int32, Int32)?
 
     private let halfWidth: CGFloat = 32
     private let halfHeight: CGFloat = 16
 
     override init(size: CGSize) {
         super.init(size: size)
-        backgroundColor = UIColor(red: 0.05, green: 0.22, blue: 0.37, alpha: 1)
+        backgroundColor = UIColor(red: 14 / 255, green: 94 / 255, blue: 140 / 255, alpha: 1)
         isUserInteractionEnabled = true
         terrainLayer.zPosition = 0
         buildingLayer.zPosition = 10
@@ -44,7 +46,46 @@ final class IslandScene: SKScene {
         camera = cameraNode
         nightLayer.zPosition = 100
         cameraNode.addChild(nightLayer)
+        installFocusMarker()
         resizeNightLayer()
+    }
+
+    /// Pans to a tile from the gazette. Does not change how the city is drawn.
+    func reveal(tileX: Int32, tileY: Int32) {
+        guard cameraInitialized else {
+            pendingReveal = (tileX, tileY)
+            return
+        }
+        let target = point(x: tileX, y: tileY)
+        if let framing {
+            let x = framing.focusRect.midX - framing.viewSize.width / 2
+            let y = framing.focusRect.midY - framing.viewSize.height / 2
+            cameraNode.position = CGPoint(x: target.x - x * cameraNode.xScale,
+                                          y: target.y + y * cameraNode.yScale)
+        } else {
+            cameraNode.position = target
+        }
+        cameraUserAdjusted = true
+        clampCameraToMap()
+        focusMarker.position = target
+        focusMarker.isHidden = false
+        refreshVisible(force: true)
+    }
+
+    private func installFocusMarker() {
+        let path = CGMutablePath()
+        path.move(to: CGPoint(x: 0, y: 18))
+        path.addLine(to: CGPoint(x: 34, y: 0))
+        path.addLine(to: CGPoint(x: 0, y: -18))
+        path.addLine(to: CGPoint(x: -34, y: 0))
+        path.closeSubpath()
+        focusMarker.path = path
+        focusMarker.strokeColor = UIColor(red: 210 / 255, green: 85 / 255, blue: 46 / 255, alpha: 1)
+        focusMarker.fillColor = UIColor(red: 242 / 255, green: 98 / 255, blue: 42 / 255, alpha: 0.28)
+        focusMarker.lineWidth = 3
+        focusMarker.zPosition = 80
+        focusMarker.isHidden = true
+        addChild(focusMarker)
     }
 
     required init?(coder: NSCoder) { fatalError("Use init(size:)") }
@@ -110,6 +151,10 @@ final class IslandScene: SKScene {
                 cameraNode.position = worldCenter
             }
             cameraInitialized = true
+            if let pending = pendingReveal {
+                pendingReveal = nil
+                reveal(tileX: pending.0, tileY: pending.1)
+            }
         }
         clampCameraToMap()
         refreshVisible(force: true)

@@ -11,6 +11,12 @@
   A00000000000000000000006 = {isa = PBXBuildFile; fileRef = B00000000000000000000006; };
   A00000000000000000000007 = {isa = PBXBuildFile; fileRef = B00000000000000000000007; };
   A0000000000000000000000A = {isa = PBXBuildFile; fileRef = B0000000000000000000000A; };
+  A0000000000000000000000B = {isa = PBXBuildFile; fileRef = B0000000000000000000000B; };
+  A0000000000000000000000C = {isa = PBXBuildFile; fileRef = B0000000000000000000000C; };
+  A0000000000000000000000D = {isa = PBXBuildFile; fileRef = B0000000000000000000000D; };
+  A0000000000000000000000E = {isa = PBXBuildFile; fileRef = B0000000000000000000000E; };
+  A0000000000000000000000F = {isa = PBXBuildFile; fileRef = B0000000000000000000000F; };
+  A00000000000000000000010 = {isa = PBXBuildFile; fileRef = B00000000000000000000010; };
   A00000000000000000000008 = {isa = PBXBuildFile; productRef = B00000000000000000000009; };
 /* End PBXBuildFile section */
 /* Begin PBXFileReference section */
@@ -20,6 +26,12 @@
   B00000000000000000000006 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IslandView.swift; sourceTree = "<group>"; };
   B00000000000000000000007 = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
   B0000000000000000000000A = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IslandScene.swift; sourceTree = "<group>"; };
+  B0000000000000000000000B = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RepublicTheme.swift; sourceTree = "<group>"; };
+  B0000000000000000000000C = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CityLayout.swift; sourceTree = "<group>"; };
+  B0000000000000000000000D = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgendaBoard.swift; sourceTree = "<group>"; };
+  B0000000000000000000000E = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PeopleView.swift; sourceTree = "<group>"; };
+  B0000000000000000000000F = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GazetteView.swift; sourceTree = "<group>"; };
+  B00000000000000000000010 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GovernmentView.swift; sourceTree = "<group>"; };
   B000000000000000000000000 = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = PocketRepublic.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 /* Begin PBXFrameworksBuildPhase section */
@@ -30,7 +42,7 @@
   D00000000000000000000001 = {isa = PBXGroup; children = (D00000000000000000000002, D00000000000000000000004, D00000000000000000000005, B00000000000000000000007,); path = PocketRepublic; sourceTree = "<group>"; };
   D00000000000000000000002 = {isa = PBXGroup; children = (B00000000000000000000004,); path = App; sourceTree = "<group>"; };
   D00000000000000000000004 = {isa = PBXGroup; children = (B00000000000000000000003,); path = Simulation; sourceTree = "<group>"; };
-  D00000000000000000000005 = {isa = PBXGroup; children = (B00000000000000000000005, B00000000000000000000006, B0000000000000000000000A,); path = Views; sourceTree = "<group>"; };
+  D00000000000000000000005 = {isa = PBXGroup; children = (B00000000000000000000005, B00000000000000000000006, B0000000000000000000000A, B0000000000000000000000B, B0000000000000000000000C, B0000000000000000000000D, B0000000000000000000000E, B0000000000000000000000F, B00000000000000000000010,); path = Views; sourceTree = "<group>"; };
   D00000000000000000000006 = {isa = PBXGroup; children = (B000000000000000000000000,); name = Products; sourceTree = "<group>"; };
 /* End PBXGroup section */
 /* Begin PBXNativeTarget section */
@@ -43,7 +55,7 @@
   C00000000000000000000003 = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (A00000000000000000000007,); runOnlyForDeploymentPostprocessing = 0; };
 /* End PBXResourcesBuildPhase section */
 /* Begin PBXSourcesBuildPhase section */
-  C00000000000000000000002 = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (A00000000000000000000003, A00000000000000000000004, A00000000000000000000005, A00000000000000000000006, A0000000000000000000000A,); runOnlyForDeploymentPostprocessing = 0; };
+  C00000000000000000000002 = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (A00000000000000000000003, A00000000000000000000004, A00000000000000000000005, A00000000000000000000006, A0000000000000000000000A, A0000000000000000000000B, A0000000000000000000000C, A0000000000000000000000D, A0000000000000000000000E, A0000000000000000000000F, A00000000000000000000010,); runOnlyForDeploymentPostprocessing = 0; };
 /* End PBXSourcesBuildPhase section */
 /* Begin XCBuildConfiguration section */
   F00000000000000000000002 = {isa = XCBuildConfiguration; buildSettings = {CLANG_ENABLE_MODULES = YES; IPHONEOS_DEPLOYMENT_TARGET = 17.0; SDKROOT = iphoneos; SWIFT_VERSION = 5.0; }; name = Debug; };
