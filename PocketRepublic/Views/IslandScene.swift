@@ -14,9 +14,11 @@ final class IslandScene: SKScene {
     private var renderedState: RepublicState?
     private var tileNodes: [Int32: SKSpriteNode] = [:]
     private var buildingNodes: [BuildingID: SKSpriteNode] = [:]
-    private var citizenNodes: [CitizenID: SKShapeNode] = [:]
+    private var citizenNodes: [CitizenID: SKSpriteNode] = [:]
     private var visibleCitizenIDs: [CitizenID] = []
-    private var ambientNodes: [Int32: SKShapeNode] = [:]
+    private var routines: [CitizenID: DailyRoutine] = [:]
+    private var walkerFacing: [CitizenID: WalkerFacing] = [:]
+    private var decoNodes: [Int32: SKSpriteNode] = [:]
     private let reachLayer = SKNode()
     private let ghostLayer = SKNode()
     private var placementKind: BuildingKind?
@@ -26,7 +28,6 @@ final class IslandScene: SKScene {
     private let tileTick = UISelectionFeedbackGenerator()
     var onPlacementHint: ((String?) -> Void)?
     private var tileTextures: [String: SKTexture] = [:]
-    private var routeCache: [RouteKey: [TileIndex]] = [:]
     private var visibleRect: TileRect?
     private var animationTime: TimeInterval = 0
     private var cameraInitialized = false
@@ -111,8 +112,8 @@ final class IslandScene: SKScene {
 
     func render(_ state: RepublicState) {
         if let old = renderedState,
-           old.map.road != state.map.road || old.map.buildingAt != state.map.buildingAt {
-            routeCache.removeAll()
+           old.day != state.day || old.map.road != state.map.road || old.map.buildingAt != state.map.buildingAt {
+            routines.removeAll()
         }
         renderedState = state
         if !cameraInitialized {
@@ -221,12 +222,15 @@ final class IslandScene: SKScene {
                 for x in rect.x0...rect.x1 {
                     let tile = map.index(x: x, y: y)
                     wantedTiles.insert(tile.raw)
-                    let texture = texture(for: map.terrain(at: tile), road: map.isRoad(at: tile))
+                    let signature = MapArt.tileSignature(x: x, y: y, map: map)
                     if let node = tileNodes[tile.raw] {
-                        if force { node.texture = texture }
+                        if node.name != signature { configureTile(node, x: x, y: y, map: map, signature: signature) }
                     } else {
-                        let node = SKSpriteNode(texture: texture, size: CGSize(width: 64, height: 32))
+                        let node = SKSpriteNode()
+                        node.size = MapArt.tileSize
+                        node.anchorPoint = CGPoint(x: 0.5, y: 0.5)
                         node.position = point(x: x, y: y)
+                        configureTile(node, x: x, y: y, map: map, signature: signature)
                         terrainLayer.addChild(node)
                         tileNodes[tile.raw] = node
                     }
@@ -237,6 +241,7 @@ final class IslandScene: SKScene {
             node.removeFromParent()
             tileNodes.removeValue(forKey: id)
         }
+        refreshDecorations(map: map, rect: rect)
 
         let buildingRect = rect.expanded(by: 16, map: map)
         var wantedBuildings = Set<BuildingID>()
@@ -310,10 +315,61 @@ final class IslandScene: SKScene {
         return path
     }
 
-    private func texture(for terrain: TerrainKind, road: Bool) -> SKTexture {
+    private func configureTile(_ node: SKSpriteNode, x: Int32, y: Int32, map: WorldMap, signature: String) {
+        let terrain = map.terrain(at: map.index(x: x, y: y))
+        let groundName = MapArt.terrainName(terrain, x: x, y: y)
+        node.texture = MapArt.texture(named: groundName) ?? proceduralTile(terrain, road: false)
+        node.size = MapArt.tileSize
+        node.removeAllChildren()
+        if map.isRoad(at: map.index(x: x, y: y)) {
+            let mask = MapArt.roadMask(x: x, y: y, map: map)
+            let road = SKSpriteNode(texture: MapArt.texture(named: MapArt.roadNames[mask]) ?? proceduralTile(terrain, road: true),
+                                    size: MapArt.tileSize)
+            road.anchorPoint = CGPoint(x: 0.5, y: 0.5)
+            road.zPosition = 0.8
+            node.addChild(road)
+        }
+        for name in MapArt.shoreNames(x: x, y: y, map: map) {
+            guard let texture = MapArt.texture(named: name) else { continue }
+            let shore = SKSpriteNode(texture: texture, size: MapArt.tileSize)
+            shore.anchorPoint = CGPoint(x: 0.5, y: 0.5)
+            shore.zPosition = 0.4
+            node.addChild(shore)
+        }
+        node.name = signature
+    }
+
+    private func refreshDecorations(map: WorldMap, rect: TileRect) {
+        var wanted = Set<Int32>()
+        if rect.x0 <= rect.x1 && rect.y0 <= rect.y1 {
+            for y in rect.y0...rect.y1 {
+                for x in rect.x0...rect.x1 {
+                    let tile = map.index(x: x, y: y)
+                    guard map.buildingAt(tile) == nil, !map.isRoad(at: tile),
+                          let spec = MapArt.decoration(x: x, y: y, terrain: map.terrain(at: tile)),
+                          let texture = MapArt.texture(named: spec.name) else { continue }
+                    wanted.insert(tile.raw)
+                    if decoNodes[tile.raw] == nil {
+                        let node = SKSpriteNode(texture: texture, size: spec.size)
+                        node.anchorPoint = spec.anchor
+                        node.position = point(x: x, y: y)
+                        node.zPosition = CGFloat(x + y) / 100
+                        buildingLayer.addChild(node)
+                        decoNodes[tile.raw] = node
+                    }
+                }
+            }
+        }
+        for (raw, node) in decoNodes where !wanted.contains(raw) {
+            node.removeFromParent()
+            decoNodes.removeValue(forKey: raw)
+        }
+    }
+
+    private func proceduralTile(_ terrain: TerrainKind, road: Bool) -> SKTexture {
         let key = "\(terrain.rawValue)-\(road)"
         if let existing = tileTextures[key] { return existing }
-        let image = UIGraphicsImageRenderer(size: CGSize(width: 64, height: 32)).image { _ in
+        let image = UIGraphicsImageRenderer(size: MapArt.tileSize).image { _ in
             let diamond = UIBezierPath()
             diamond.move(to: CGPoint(x: 32, y: 0))
             diamond.addLine(to: CGPoint(x: 64, y: 16))
@@ -334,128 +390,140 @@ final class IslandScene: SKScene {
 
     private func refreshPeople(state: RepublicState, rect: TileRect) {
         let map = state.map
-        // Retain already drawn walkers across small viewport changes. A route can
-        // cross the view even when both its home and workplace lie outside it.
-        let candidates = state.citizens.filter { citizen in
-            guard citizen.alive, let home = citizen.home, let work = citizen.work,
-                  Int(home.raw) < state.buildings.count, Int(work.raw) < state.buildings.count else { return false }
-            return path(from: state.buildings[Int(home.raw)].tile,
-                        to: state.buildings[Int(work.raw)].tile, in: map)
-                .contains { rect.contains($0, in: map) }
+        let access = state.buildingAccess()
+        var visible: [Citizen] = []
+        visible.reserveCapacity(state.citizens.count)
+        for citizen in state.citizens where citizen.alive {
+            let routine = self.routine(for: citizen, in: state, access: access)
+            let tiles = routine.path.isEmpty ? routine.entrances : routine.path
+            guard tiles.contains(where: { rect.contains($0, in: map) }) else { continue }
+            visible.append(citizen)
         }
-        let retained = candidates.filter { citizenNodes[$0.id] != nil }
-        let newcomers = candidates.filter { citizenNodes[$0.id] == nil }
-        let visible = Array((retained + newcomers).prefix(24))
         let wanted = Set(visible.map(\.id))
         visibleCitizenIDs = visible.map(\.id)
         for citizen in visible {
-            if citizenNodes[citizen.id] == nil {
-                let node = SKShapeNode(circleOfRadius: 3)
-                node.fillColor = citizen.daysHungry > 0 ? .orange : .white
-                node.strokeColor = .black
-                node.lineWidth = 1
-                peopleLayer.addChild(node)
+            let node: SKSpriteNode
+            if let existing = citizenNodes[citizen.id] {
+                node = existing
+            } else {
+                node = SKSpriteNode()
+                node.size = MapArt.walkerSize
+                node.anchorPoint = CGPoint(x: 0.5, y: 0)
+                buildingLayer.addChild(node)
                 citizenNodes[citizen.id] = node
             }
-            // Newly entered walkers start on their route, never at scene origin.
-            citizenNodes[citizen.id]?.position = position(for: citizen, at: animationTime, in: state)
+            if let routine = routines[citizen.id] {
+                applyWalker(node, citizen: citizen, routine: routine, map: map, time: animationTime)
+            }
         }
         for (id, node) in citizenNodes where !wanted.contains(id) {
             node.removeFromParent()
             citizenNodes.removeValue(forKey: id)
+            walkerFacing.removeValue(forKey: id)
         }
+    }
 
-        // Sample roads by stable tile ID so panning cannot reshuffle every extra.
-        let wantedAmbient = Set(tileNodes.keys.filter { raw in
-            map.road[Int(raw)] && (UInt32(bitPattern: raw) &* 2_654_435_761) % 7 == 0
-        })
-        for raw in wantedAmbient where ambientNodes[raw] == nil {
-            let node = SKShapeNode(circleOfRadius: 2)
-            node.fillColor = .yellow
-            node.strokeColor = .clear
-            node.position = point(for: TileIndex(raw), in: map)
-            peopleLayer.addChild(node)
-            ambientNodes[raw] = node
-        }
-        for (raw, node) in ambientNodes where !wantedAmbient.contains(raw) {
-            node.removeFromParent()
-            ambientNodes.removeValue(forKey: raw)
-        }
+    private func routine(for citizen: Citizen, in state: RepublicState, access: MapBuildingAccess) -> DailyRoutine {
+        if let cached = routines[citizen.id] { return cached }
+        let planned = WalkerRoutine.plan(for: citizen, in: state, access: access)
+        routines[citizen.id] = planned
+        return planned
     }
 
     override func update(_ currentTime: TimeInterval) {
         guard let state = renderedState else { return }
-        let map = state.map
         animationTime = currentTime
         let phase = (currentTime / 100 + Double(state.day % 3) / 3).truncatingRemainder(dividingBy: 1)
         nightLayer.alpha = CGFloat(0.07 + 0.25 * (1 - cos(phase * .pi * 2)) / 2)
 
+        let map = state.map
         for id in visibleCitizenIDs {
-            guard Int(id.raw) < state.citizens.count else { continue }
-            let citizen = state.citizens[Int(id.raw)]
-            guard let home = citizen.home, let work = citizen.work,
-                  Int(home.raw) < state.buildings.count, Int(work.raw) < state.buildings.count else { continue }
-            citizenNodes[id]?.position = position(for: citizen, at: currentTime, in: state)
-        }
-        for (raw, node) in ambientNodes {
-            let base = point(for: TileIndex(raw), in: map)
-            let drift = currentTime + Double(raw % 17)
-            node.position = CGPoint(x: base.x + CGFloat(sin(drift * 0.8) * 9),
-                                    y: base.y + CGFloat(cos(drift * 0.8) * 3))
+            guard let node = citizenNodes[id], Int(id.raw) < state.citizens.count,
+                  let routine = routines[id] else { continue }
+            applyWalker(node, citizen: state.citizens[Int(id.raw)], routine: routine, map: map, time: currentTime)
         }
     }
 
-    private func position(for citizen: Citizen, at time: TimeInterval, in state: RepublicState) -> CGPoint {
-        guard let home = citizen.home, let work = citizen.work,
-              Int(home.raw) < state.buildings.count, Int(work.raw) < state.buildings.count else { return .zero }
-        let route = path(from: state.buildings[Int(home.raw)].tile,
-                         to: state.buildings[Int(work.raw)].tile, in: state.map)
-        let offset = Double(UInt32(bitPattern: citizen.id.raw &* 7 &+ state.day &* 11) % 20)
-        let t = (time + offset).truncatingRemainder(dividingBy: 20)
-        let progress = t < 8 ? t / 8 : (t < 10 ? 1 : (t < 18 ? 1 - (t - 10) / 8 : 0))
-        return position(along: route, progress: progress, in: state.map)
+    /// One simulated day has no clock of its own. While it stays paused, the scene
+    /// plays `DailyRoutine` across 24 hours at two seconds each and slides the
+    /// sprite along the core path between those hours.
+    private func applyWalker(_ node: SKSpriteNode, citizen: Citizen, routine: DailyRoutine,
+                             map: WorldMap, time: TimeInterval) {
+        guard let pose = walkerPose(routine, at: time, map: map) else { return }
+        node.position = pose.position
+        node.zPosition = pose.sort
+        let facing = pose.facing ?? walkerFacing[citizen.id] ?? .sw
+        if pose.moving { walkerFacing[citizen.id] = facing }
+        let frame = pose.moving ? Int(time / 0.15) % 2 : 0
+        let variant = Int(UInt32(bitPattern: citizen.id.raw) % 6)
+        node.texture = MapArt.walkerTexture(variant: variant, facing: facing, frame: frame) ?? proceduralWalker
+        node.size = MapArt.walkerSize
+        node.xScale = abs(node.xScale) * facing.xScale
+        if citizen.daysHungry > 0 {
+            node.color = MapArt.hungryOrange
+            node.colorBlendFactor = 0.55
+        } else {
+            node.colorBlendFactor = 0
+        }
     }
 
-    private func position(along path: [TileIndex], progress: Double, in map: WorldMap) -> CGPoint {
-        guard let first = path.first else { return .zero }
-        guard path.count > 1 else { return point(for: first, in: map) }
-        let scaled = max(0, min(1, progress)) * Double(path.count - 1)
-        let index = min(path.count - 2, Int(scaled))
-        let a = point(for: path[index], in: map), b = point(for: path[index + 1], in: map)
-        let part = CGFloat(scaled - Double(index))
-        return CGPoint(x: a.x + (b.x - a.x) * part, y: a.y + (b.y - a.y) * part)
-    }
-
-    /// Presentation-only paths; the simulation's accessibility fields remain authoritative.
-    private func path(from start: TileIndex, to end: TileIndex, in map: WorldMap) -> [TileIndex] {
-        let key = RouteKey(from: start.raw, to: end.raw)
-        if let cached = routeCache[key] { return cached }
-        if start == end { return [start] }
-        var queue = [start]
-        var head = 0
-        var parent: [Int32: Int32] = [start.raw: start.raw]
-        while head < queue.count && parent[end.raw] == nil {
-            let current = queue[head]
-            head += 1
-            for next in map.neighbours(of: current) where map.isPassable(next) && parent[next.raw] == nil {
-                parent[next.raw] = current.raw
-                queue.append(next)
+    private func walkerPose(_ routine: DailyRoutine, at time: TimeInterval, map: WorldMap) -> WalkerPose? {
+        guard let fallback = routine.entrances.first ?? routine.path.first else { return nil }
+        let hour = time.truncatingRemainder(dividingBy: MapArt.visualDay) / MapArt.secondsPerHour
+        for i in routine.dwellStart.indices where i < routine.dwellEnd.count && i < routine.entrances.count {
+            if hour >= Double(routine.dwellStart[i]) && hour < Double(routine.dwellEnd[i]) {
+                return standing(routine.entrances[i], map: map)
             }
         }
-        guard parent[end.raw] != nil else {
-            routeCache[key] = [start]
-            return [start]
+        let legs = min(routine.legPaths.count, routine.entrances.count - 1)
+        for i in 0..<legs where i < routine.dwellEnd.count && (i + 1) < routine.dwellStart.count {
+            let leave = routine.dwellEnd[i]
+            let arrive = routine.dwellStart[i + 1]
+            guard hour >= Double(leave), hour < Double(arrive) else { continue }
+            let span = Double(arrive - leave)
+            let t = span > 0 ? (hour - Double(leave)) / span : 1
+            return along(routine.legPaths[i], progress: t, map: map)
         }
-        var reverse = [end]
-        var current = end.raw
-        while current != start.raw {
-            guard let previous = parent[current] else { break }
-            current = previous
-            reverse.append(TileIndex(current))
+        return standing(routine.entrances.last ?? fallback, map: map)
+    }
+
+    private func standing(_ tile: TileIndex, map: WorldMap) -> WalkerPose {
+        let x = map.x(of: tile), y = map.y(of: tile)
+        return WalkerPose(position: point(x: x, y: y), moving: false, facing: nil,
+                          sort: CGFloat(x + y) / 100 + 0.02)
+    }
+
+    private func along(_ leg: [TileIndex], progress: Double, map: WorldMap) -> WalkerPose {
+        guard let first = leg.first else { return standing(TileIndex(0), map: map) }
+        guard leg.count > 1 else { return standing(first, map: map) }
+        let scaled = max(0, min(0.999, progress)) * Double(leg.count - 1)
+        let index = min(leg.count - 2, Int(scaled))
+        let a = leg[index], b = leg[index + 1]
+        let part = CGFloat(scaled - Double(index))
+        let pa = point(for: a, in: map), pb = point(for: b, in: map)
+        let dx = map.x(of: b) - map.x(of: a)
+        let dy = map.y(of: b) - map.y(of: a)
+        let frontX = max(map.x(of: a), map.x(of: b))
+        let frontY = max(map.y(of: a), map.y(of: b))
+        return WalkerPose(
+            position: CGPoint(x: pa.x + (pb.x - pa.x) * part, y: pa.y + (pb.y - pa.y) * part),
+            moving: true,
+            facing: WalkerFacing.forStep(dx: dx, dy: dy),
+            sort: CGFloat(frontX + frontY) / 100 + 0.02
+        )
+    }
+
+    private var proceduralWalker: SKTexture {
+        let key = "walker-dot"
+        if let existing = tileTextures[key] { return existing }
+        let image = UIGraphicsImageRenderer(size: MapArt.walkerSize).image { _ in
+            UIColor.white.setFill()
+            UIBezierPath(ovalIn: CGRect(x: 3, y: 8, width: 6, height: 6)).fill()
         }
-        let result = Array(reverse.reversed())
-        routeCache[key] = result
-        return result
+        let texture = SKTexture(image: image)
+        texture.filteringMode = .nearest
+        tileTextures[key] = texture
+        return texture
     }
 
     private func updateHover(at location: CGPoint) {
@@ -644,8 +712,6 @@ struct CameraFraming: Equatable {
     let tileWidths: CGFloat
 }
 
-private struct RouteKey: Hashable { let from: Int32; let to: Int32 }
-
 private struct TileRect: Equatable {
     let x0: Int32, y0: Int32, x1: Int32, y1: Int32
     func contains(_ tile: TileIndex, in map: WorldMap) -> Bool {
@@ -667,6 +733,177 @@ private struct GhostDrawKey: Equatable {
     var entrance: Int32?
     var tileCount: Int
     var stamp: Int
+}
+
+private struct WalkerPose {
+    var position: CGPoint
+    var moving: Bool
+    var facing: WalkerFacing?
+    var sort: CGFloat
+}
+
+/// `ne` and `sw` are the drawn sheets. NW reuses `ne` flipped, SE reuses `sw` flipped.
+private struct WalkerFacing {
+    var side: String
+    var xScale: CGFloat
+
+    static let ne = WalkerFacing(side: "ne", xScale: 1)
+    static let sw = WalkerFacing(side: "sw", xScale: 1)
+    static let nw = WalkerFacing(side: "ne", xScale: -1)
+    static let se = WalkerFacing(side: "sw", xScale: -1)
+
+    /// Grid step under `IslandScene.point(x:y:)`. N (dy < 0) is up-right, E (dx > 0) is down-right.
+    static func forStep(dx: Int32, dy: Int32) -> WalkerFacing {
+        if dy < 0 { return .ne }
+        if dx > 0 { return .se }
+        if dy > 0 { return .sw }
+        return .nw
+    }
+}
+
+/// Names and sizes from `docs/art/road_autotile.json`, `decos.json`, and `docs/art/ASSETS.md`.
+private enum MapArt {
+    static let tileSize = CGSize(width: 64, height: 32)
+    static let walkerSize = CGSize(width: 12, height: 18)
+    static let secondsPerHour: TimeInterval = 2
+    static var visualDay: TimeInterval { secondsPerHour * 24 }
+    static let hungryOrange = UIColor(red: 242 / 255, green: 98 / 255, blue: 42 / 255, alpha: 1)
+
+    /// Index is the neighbour bitmask. N=1, E=2, S=4, W=8, matching `road_autotile.json`.
+    static let roadNames = [
+        "road_single", "road_end_n", "road_end_e", "road_corner_ne",
+        "road_end_s", "road_straight_ns", "road_corner_es", "road_t_nes",
+        "road_end_w", "road_corner_wn", "road_straight_ew", "road_t_wne",
+        "road_corner_sw", "road_t_swn", "road_t_esw", "road_cross"
+    ]
+
+    private static var textures: [String: SKTexture] = [:]
+
+    static func texture(named name: String) -> SKTexture? {
+        if let cached = textures[name] { return cached }
+        guard let image = UIImage(named: name) else { return nil }
+        let texture = SKTexture(image: image)
+        texture.filteringMode = .nearest
+        textures[name] = texture
+        return texture
+    }
+
+    static func mix(_ x: Int32, _ y: Int32) -> Int {
+        let h = Int(x) &* 7_385_6093 ^ Int(y) &* 19_349_663
+        return h < 0 ? -h : h
+    }
+
+    static func terrainName(_ terrain: TerrainKind, x: Int32, y: Int32) -> String {
+        let count: Int
+        let prefix: String
+        switch terrain {
+        case .grass: count = 4; prefix = "tile_grass"
+        case .fertile: count = 4; prefix = "tile_fertile"
+        case .sand: count = 4; prefix = "tile_sand"
+        case .rock: count = 3; prefix = "tile_rock"
+        case .water: count = 4; prefix = "tile_water"
+        }
+        return "\(prefix)_\(mix(x, y) % count)"
+    }
+
+    /// N (x, y−1) is up-right on screen and E (x+1, y) is down-right, the same axes as the art.
+    static func roadMask(x: Int32, y: Int32, map: WorldMap) -> Int {
+        var mask = 0
+        if isRoad(x, y - 1, map) { mask |= 1 }
+        if isRoad(x + 1, y, map) { mask |= 2 }
+        if isRoad(x, y + 1, map) { mask |= 4 }
+        if isRoad(x - 1, y, map) { mask |= 8 }
+        return mask
+    }
+
+    static func tileSignature(x: Int32, y: Int32, map: WorldMap) -> String {
+        let tile = map.index(x: x, y: y)
+        let road = map.isRoad(at: tile) ? roadMask(x: x, y: y, map: map) : -1
+        return "\(terrainName(map.terrain(at: tile), x: x, y: y))|\(road)|\(shoreNames(x: x, y: y, map: map).joined(separator: ","))"
+    }
+
+    static func shoreNames(x: Int32, y: Int32, map: WorldMap) -> [String] {
+        guard map.terrain(at: map.index(x: x, y: y)) == .water else { return [] }
+        var names: [String] = []
+        if isLand(x, y - 1, map) { names.append("tile_shore_n") }
+        if isLand(x + 1, y, map) { names.append("tile_shore_e") }
+        if isLand(x, y + 1, map) { names.append("tile_shore_s") }
+        if isLand(x - 1, y, map) { names.append("tile_shore_w") }
+        if isLand(x + 1, y - 1, map), isWater(x, y - 1, map), isWater(x + 1, y, map) {
+            names.append("tile_shore_corner_ne")
+        }
+        if isLand(x + 1, y + 1, map), isWater(x + 1, y, map), isWater(x, y + 1, map) {
+            names.append("tile_shore_corner_se")
+        }
+        if isLand(x - 1, y + 1, map), isWater(x - 1, y, map), isWater(x, y + 1, map) {
+            names.append("tile_shore_corner_sw")
+        }
+        if isLand(x - 1, y - 1, map), isWater(x, y - 1, map), isWater(x - 1, y, map) {
+            names.append("tile_shore_corner_nw")
+        }
+        return names
+    }
+
+    struct Decoration {
+        var name: String
+        var size: CGSize
+        var anchor: CGPoint
+    }
+
+    /// Sparse props on empty ground. The core does not store decoration tiles.
+    /// Sizes and anchors are the `decos.json` entries.
+    static func decoration(x: Int32, y: Int32, terrain: TerrainKind) -> Decoration? {
+        let bucket = mix(x, y)
+        let name: String
+        switch terrain {
+        case .sand:
+            guard bucket % 9 == 0 else { return nil }
+            name = "deco_palm_\((bucket / 9) % 3)"
+        case .grass:
+            guard bucket % 13 == 0 else { return nil }
+            name = ["deco_bush_0", "deco_bush_1", "deco_flowers_0"][(bucket / 13) % 3]
+        case .fertile:
+            guard bucket % 17 == 0 else { return nil }
+            name = ["deco_flowers_0", "deco_bush_0"][(bucket / 17) % 2]
+        case .rock:
+            guard bucket % 11 == 0 else { return nil }
+            name = "deco_rock_\((bucket / 11) % 2)"
+        case .water:
+            return nil
+        }
+        guard let size = decoSizes[name] else { return nil }
+        return Decoration(name: name, size: size, anchor: CGPoint(x: 0.5, y: 0))
+    }
+
+    private static let decoSizes: [String: CGSize] = [
+        "deco_palm_0": CGSize(width: 52, height: 65),
+        "deco_palm_1": CGSize(width: 44, height: 50),
+        "deco_palm_2": CGSize(width: 52, height: 62),
+        "deco_bush_0": CGSize(width: 38, height: 33),
+        "deco_bush_1": CGSize(width: 38, height: 31),
+        "deco_rock_0": CGSize(width: 40, height: 36),
+        "deco_rock_1": CGSize(width: 34, height: 26),
+        "deco_flowers_0": CGSize(width: 34, height: 22)
+    ]
+
+    static func walkerTexture(variant: Int, facing: WalkerFacing, frame: Int) -> SKTexture? {
+        texture(named: "walker_\(variant)_\(facing.side)_f\(frame)")
+    }
+
+    private static func isRoad(_ x: Int32, _ y: Int32, _ map: WorldMap) -> Bool {
+        guard map.contains(x: x, y: y) else { return false }
+        return map.isRoad(at: map.index(x: x, y: y))
+    }
+
+    private static func isLand(_ x: Int32, _ y: Int32, _ map: WorldMap) -> Bool {
+        guard map.contains(x: x, y: y) else { return false }
+        return map.terrain(at: map.index(x: x, y: y)) != .water
+    }
+
+    private static func isWater(_ x: Int32, _ y: Int32, _ map: WorldMap) -> Bool {
+        guard map.contains(x: x, y: y) else { return false }
+        return map.terrain(at: map.index(x: x, y: y)) == .water
+    }
 }
 
 private extension TerrainKind {
