@@ -10,7 +10,7 @@ Jordan wants Pocket Republic to feel like a lively, living world with a real gam
 
 ## Current state
 
-Snapshot of main `dd87c6e` (PR #2 squash-merge) plus this docs pass, read against the code on 2026-10-25. This environment has no Swift toolchain and no iPhone, so tests and the device build were not re-run here.
+Snapshot of `cursor/building-inspect-panel-ef49` on top of main `b960f52`, read against the code on 2026-10-25. `swift test` in `PocketRepublicCore` passed 51 tests on Swift 6.2 (Linux, debug). This environment has no iOS SDK, so the island UI was not run on a simulator or a phone.
 
 ### What works
 
@@ -18,7 +18,7 @@ The repo is a SwiftUI app plus a SpriteKit island, with the simulation in the pu
 
 The core has agenda, decrees, and factions. `DecreeCatalogue` is data applied through `RepublicState.apply`. `DecreeSpec` has `name`, `cost`, `salience`, and `effect` (including `favorFactions` / `favorDeltas`). It has no flavor string yet. Factions are `labourers`, `merchants`, `officials`, and `landless`, with membership derived from occupation. Only a crisis (`pending` or a crisis-tier agenda item) blocks the day advance. The island shows crisis and agenda cards; Govern lists agenda items as option buttons and an income-tax stepper; People lists living citizens; Events lists the log newest first, with a prettified `EventKind` title and the first cause's detail. `EventKind` already covers the cases in the design's headline table, and each `GameEvent` can carry `CauseFactor`s, subjects, and a location.
 
-The island scene draws procedural isometric terrain diamonds (64×32), grey roads, and one colored rectangle per building (26×23 pt, town hall 26×32) anchored near the tile. Camera pan and pinch-zoom work. Tools cover inspect, road, house, farm, market, clinic, school, police, workshop, and dock. Inspect is the default. A tap that is not a drag selects the tile and shows one caption: `Tile x, y` plus road, the building kind name, or the terrain. It does not open a building panel. `PlayerIntent.demolish` exists in the core; the tool strip has no demolish control.
+The island scene draws procedural isometric terrain diamonds (64×32), grey roads, and one colored rectangle per building (26×23 pt, town hall 26×32) anchored near the tile. Camera pan and pinch-zoom work. Tools cover inspect, road, house, farm, market, clinic, school, police, workshop, and dock. Inspect is the default. A tap that is not a drag, with Inspect selected, uses the shared isometric hit test and then `WorldMap.buildingAt`. Whichever building occupies that tile is selected, including a footprint tile that is not `Building.tile`. Every occupied tile is highlighted. `BuildingInspectPanel` opens in the controls column. The view sizes to its content and does not present itself as a sheet, so a later layout pass can put the same view in the unfolded side pane or the folded bottom sheet. It shows the kind's display name, type, and district; one status line (no road access, then understaffed, then no food, otherwise "Running well"); workers out of capacity, or for a house the residents out of capacity with each person's hunger and job; food stored on farms and markets; funds; upkeep per day; residents within `maxServiceDistance` for market, clinic, school, and police; and the day built. Farms, workshops, and docks switch `OperatingMode` by sending `PlayerIntent.setOperatingMode` (the placement commission was the only writer of that field before this). Demolish asks for confirmation, then sends the existing `PlayerIntent.demolish`. The Town Hall offers no demolish button. Empty ground or Close clears the selection. Road and building tools still place on tap, and a drag still pans or pinches. A tap on empty ground still shows the `Tile x, y` caption. The design's side-by-side and bottom-sheet hosts, the sprite wiggle, and follow-a-resident are not in this change. Footprint sizes, hunger, and walker routing are unchanged.
 
 Walkers are cosmetic. Up to 24 employed citizens whose home–work route crosses the viewport are white dots (orange when `daysHungry > 0`). Each dot shuttles along that route on a 20-second loop: 8s out, 2s dwell, 8s back, 2s dwell. Extra yellow dots drift on a sine around every 7th road tile. That matches the Oct 25 playtest note that the dots go back and forth.
 
@@ -26,7 +26,7 @@ Duo layout landed on 2026-10-25 (commits `1c4cdcd` through `1c26ce3`). `CityDisp
 
 Saves: a valid city is `Application Support/PocketRepublic/spatial-v1.json` (envelope `formatVersion` 1, checksum `stateHash()`, `RepublicState.schemaVersion` 1), written atomically. A corrupt or unsupported file is kept and blocks play until **Start New City**. The app reads `UserDefaults` key `pocket.republic.save.v1` only to detect the old prototype; it never decodes or migrates it. A new city draws its `worldSeed` once with `UInt64.random` at the app boundary. After that, `worldSeed` and `rng` live in the saved state.
 
-The test tree contains **41** `func test` methods (determinism, conservation, agenda, causality, spatial rules, scale, and the economy dashboard). [PocketRepublicCore/README.md](PocketRepublicCore/README.md) records a Linux Swift 6.2 pass and says 40 tests, plus release timings (about 0.52 ms/tick at 1000 citizens). Those numbers were not re-measured for this entry. `EconomyReportTests` prints the 200-day dashboard and only asserts that the 250 citizens stay alive.
+The test tree contains **51** `func test` methods (the previous 41, plus `BuildingInspectionTests` for hit-testing, the inspect model, and `setOperatingMode`). [PocketRepublicCore/README.md](PocketRepublicCore/README.md) records a Linux Swift 6.2 pass and says 40 tests, plus release timings (about 0.52 ms/tick at 1000 citizens). This pass re-ran the suite in debug on Swift 6.2 and did not re-measure those release timings. `EconomyReportTests` prints the 200-day dashboard and only asserts that the 250 citizens stay alive.
 
 ### Unverified
 
@@ -42,7 +42,7 @@ Jordan's iPhone playtest is recorded below. Which binary that was, and whether C
 - **One-tile buildings, placeholder art.** `WorldMap.buildingAt` stores one building id per tile. Sprites are flat UIColor blocks. `Assets.xcassets` on this branch contains AccentColor only (no app icon, no building images).
 - **Placeholder bundle id** `com.example.PocketRepublic` on Debug and Release.
 - **Legacy save left behind.** `pocket.republic.save.v1` is detected and never migrated.
-- **Inspect is a tile caption.** Tapping a placed building does not show workers, residents, food, funds, mode, or actions.
+- **Inspect host is still the controls rail.** The panel view does not present a sheet. The design's unfolded side-by-side pane and folded bottom sheet are not built, and a tap does not wiggle the sprite or follow a resident.
 - **Walkers are a home–work shuttle**, unrelated to entrances or the clock.
 - **Decrees and events read as raw rows.** Agenda options show the label and a bare dismiss. The event list can repeat the same kind and cause on separate rows. [docs/DESIGN.md](docs/DESIGN.md) section 3 is the target presentation. `DecreeSpec` has no `flavor` field yet.
 
@@ -96,7 +96,7 @@ Built on Game Logic's core API, after the core PR merges.
 
 - Ghost preview: green or red, reason from `IntentRejection`, service reach for market, clinic, school, and police.
 - Render footprints from the core sizes and `tilesCovered`, including the sprite base in [docs/DESIGN.md](docs/DESIGN.md). Move the island toward the Duo postures in that doc (unfolded map plus panel, folded bottom sheet, selection and camera kept).
-- Inspect panel contents from the design doc, using fields the core already tracks.
+- Inspect panel contents landed on `cursor/building-inspect-panel-ef49` (see the log). Still open: host that same view in the unfolded side pane and the folded bottom sheet, and the inspect wiggle / follow-a-resident moment.
 - Decree cards and the newspaper event feed from section 3: title, flavor, cost or Free, faction chips, plain-language effects, **Issue decree** / **Not now**, and stories grouped by kind, district, and day with a because-line, names, and **Show me**.
 - CI and device build: get `.github/workflows/unsigned-ipa.yml` green on `xcode-27`, update the README toolchain lines so they match the workflow, and replace bundle id `com.example.PocketRepublic` when signing needs a real id.
 
@@ -123,6 +123,12 @@ The core PR merges first.
 - Player-customizable iPhone Duo layouts (choose what each panel shows, for example map, inspect, agenda, or stats). Owner: Ios Dev. Deferred by Jordan until performance and game feel are optimized.
 
 ## Log
+
+### 2026-10-25 11:33 AM EDT — Ios Dev — `cursor/building-inspect-panel-ef49`
+
+- **Changed:** Tap-to-inspect. `BuildingInspectPanel` is a self-contained view in the island controls column (not a bottom sheet). Selection highlights every tile `buildingAt` assigns to the building. The model is `BuildingInspection`, ordered status, then staffing, then numbers, from fields the core already tracks. The only core command added is `PlayerIntent.setOperatingMode`, because nothing else could change `OperatingMode` after the placement commission. Footprints, hunger, and walker routing were not touched.
+- **Verified:** `swift test` in `PocketRepublicCore` on Swift 6.2 (Linux, debug): 51 tests, 0 failures. No iOS SDK here, so the panel, highlight, and haptic were not run on a simulator or a phone. No screenshot.
+- **Next:** Game Logic's footprint core still comes before ghost preview and footprint rendering. This panel already selects by occupancy, so multi-tile `buildingAt` entries should light up without a second picker. A later layout PR can host `BuildingInspectPanel` in the unfolded side pane and the folded bottom sheet.
 
 ### 2026-10-25 11:25 AM EDT — Docs agent — `cursor/progress-log-d016` (PR #3)
 

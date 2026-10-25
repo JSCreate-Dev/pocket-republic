@@ -7,6 +7,9 @@ public enum PlayerIntent: Sendable, Equatable {
     case placeBuilding(BuildingKind, at: TileIndex)
     case buildRoad(at: TileIndex)
     case demolish(BuildingID)
+    /// How a farm, workshop, or dock is run. Writes the same `OperatingMode` the
+    /// placement commission already applies. It does not move money or food.
+    case setOperatingMode(BuildingID, OperatingMode)
     case setPolicy(Policy)
     case resolveDecision(DecisionID, option: Int32)
     /// Answer anything on the standing agenda: a faction demand, an advisory, a
@@ -20,6 +23,7 @@ public enum IntentRejection: String, Sendable, Equatable {
     case noPendingDecision, decisionMismatch, invalidOption
     case noSuchAgendaItem
     case crisisPendingBlocksBuilding
+    case operatingModeNotOffered
 }
 
 public enum IntentResult: Sendable, Equatable {
@@ -77,6 +81,17 @@ extension SimulationEngine {
             s.fields.markDirty()
             s.emit(.buildingAbandoned,
                    location: EventLocation(district: b.district, building: id, tile: b.tile))
+            return .accepted
+
+        case .setOperatingMode(let id, let mode):
+            guard Int(id.raw) >= 0, Int(id.raw) < s.buildings.count else {
+                return .rejected(.noSuchBuilding)
+            }
+            guard s.map.buildingAt.contains(id.raw) else { return .rejected(.noSuchBuilding) }
+            guard s.buildings[Int(id.raw)].kind.offersCommission else {
+                return .rejected(.operatingModeNotOffered)
+            }
+            s.buildings[Int(id.raw)].mode = mode
             return .accepted
 
         case .setPolicy(let p):
