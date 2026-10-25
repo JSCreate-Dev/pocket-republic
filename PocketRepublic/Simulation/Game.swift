@@ -120,6 +120,7 @@ import PocketRepublicCore
         let count = Int(map.width) * Int(map.height)
         guard map.terrain.count == count, map.districtAt.count == count,
               map.road.count == count, map.buildingAt.count == count,
+              map.entranceAt.count == count,
               map.districtAt.allSatisfy({ Int($0) < saved.districts.count }) else { return false }
 
         func validTile(_ tile: TileIndex) -> Bool {
@@ -148,17 +149,32 @@ import PocketRepublicCore
             guard faction.kind.rawValue == UInt8(index) else { return false }
         }
         for (index, building) in saved.buildings.enumerated() {
-            guard building.id.raw == Int32(index), validTile(building.tile),
+            guard building.id.raw == Int32(index),
+                  validTile(building.anchor), validTile(building.entrance),
                   validDistrict(building.district),
                   building.workers.allSatisfy(validCitizen),
                   building.residents.allSatisfy(validCitizen) else { return false }
+            // A demolished building stays in the array with its footprint cleared.
+            guard map.building(at: building.entrance) == building.id else { continue }
+            guard map.isEntrance(building.entrance),
+                  map.district(at: building.entrance) == building.district else { return false }
+            let covered = building.tilesCovered(on: map)
+            guard covered.count == building.kind.footprint.area,
+                  covered.allSatisfy({ map.building(at: $0) == building.id }) else { return false }
         }
         for (tile, raw) in map.buildingAt.enumerated() {
             guard raw >= -1 else { return false }
             if raw >= 0 {
-                guard validBuilding(BuildingID(raw)),
-                      saved.buildings[Int(raw)].tile.raw == Int32(tile) else { return false }
+                let id = BuildingID(raw)
+                guard validBuilding(id),
+                      saved.buildings[Int(raw)].tilesCovered(on: map).contains(TileIndex(Int32(tile)))
+                else { return false }
             }
+        }
+        for (index, isEntrance) in map.entranceAt.enumerated() where isEntrance {
+            let tile = TileIndex(Int32(index))
+            guard let id = map.building(at: tile),
+                  saved.buildings[Int(id.raw)].entrance == tile else { return false }
         }
         for (index, citizen) in saved.citizens.enumerated() {
             guard citizen.id.raw == Int32(index), validDistrict(citizen.district) else { return false }
@@ -213,6 +229,8 @@ private extension IntentRejection {
         case .notBuildable: return "You cannot build on this terrain."
         case .occupied: return "That tile is occupied."
         case .notConnectedToRoad: return "Buildings need an adjacent road."
+        case .notEnoughFertileLand: return "Farms need at least half their tiles on fertile land."
+        case .notTouchingWater: return "Docks need a long side against the water."
         case .insufficientTreasury: return "The treasury cannot afford that."
         case .noSuchBuilding: return "That building no longer exists."
         case .cannotDemolishTownHall: return "The town hall must remain."

@@ -97,7 +97,12 @@ public enum SimulationEngine {
             let scale = Int64(b.mode.outputPercent)
             switch b.kind {
             case .farm:
-                let bonus = s.map.terrain(at: b.tile) == .fertile ? s.config.fertileBonus : 0
+                let covered = b.tilesCovered(on: s.map)
+                let fertile = covered.reduce(into: 0) { count, tile in
+                    if s.map.terrain(at: tile) == .fertile { count += 1 }
+                }
+                let bonus = !covered.isEmpty && fertile * 2 >= covered.count
+                    ? s.config.fertileBonus : 0
                 let yield = Int64(workers * (s.config.farmYieldPerWorker + bonus)) * scale / 100
                 s.produceFood(at: b.id, Int32(yield))
             case .workshop, .dock:

@@ -4,9 +4,33 @@ public enum ServiceKind: UInt8, Codable, Sendable, CaseIterable {
     case market = 0, clinic = 1, school = 2, police = 3, work = 4
 }
 
+/// Width along +x and height along +y, in tiles. Footprints do not rotate:
+/// the anchor is always the minimum-x, minimum-y corner.
+public struct FootprintSize: Sendable, Equatable, Hashable {
+    public let width: Int32
+    public let height: Int32
+
+    public init(width: Int32, height: Int32) {
+        self.width = width
+        self.height = height
+    }
+
+    public var area: Int { Int(width * height) }
+}
+
 public enum BuildingKind: UInt8, Codable, Sendable, CaseIterable {
     case townHall = 0, house = 1, farm = 2, market = 3, clinic = 4
     case school = 5, police = 6, workshop = 7, dock = 8
+
+    /// Design table in `docs/DESIGN.md`. Width is x, height is y.
+    public var footprint: FootprintSize {
+        switch self {
+        case .house, .police: return FootprintSize(width: 2, height: 2)
+        case .market, .workshop: return FootprintSize(width: 3, height: 2)
+        case .farm, .clinic, .school, .townHall: return FootprintSize(width: 3, height: 3)
+        case .dock: return FootprintSize(width: 2, height: 3)
+        }
+    }
 
     public var housingCapacity: Int32 {
         switch self { case .house: return 4; default: return 0 }
@@ -96,7 +120,10 @@ extension BuildingKind {
 public struct Building: Codable, Sendable, Identifiable {
     public let id: BuildingID
     public let kind: BuildingKind
-    public let tile: TileIndex
+    /// Minimum-x, minimum-y corner. `PlayerIntent.placeBuilding` takes this tile.
+    public let anchor: TileIndex
+    /// The one road-facing door. Only this footprint tile is passable.
+    public let entrance: TileIndex
     public let district: DistrictID
     public let builtOnDay: Int32
 
@@ -106,13 +133,23 @@ public struct Building: Codable, Sendable, Identifiable {
     public var funds: Int64 = 0
     public var mode: OperatingMode = .balanced
 
-    public init(id: BuildingID, kind: BuildingKind, tile: TileIndex,
+    /// Service range, employment, and pathing all use the entrance.
+    public var tile: TileIndex { entrance }
+
+    public init(id: BuildingID, kind: BuildingKind, anchor: TileIndex, entrance: TileIndex,
                 district: DistrictID, builtOnDay: Int32) {
         self.id = id
         self.kind = kind
-        self.tile = tile
+        self.anchor = anchor
+        self.entrance = entrance
         self.district = district
         self.builtOnDay = builtOnDay
+    }
+
+    /// Footprint tiles in row-major order. Empty tiles of a demolished building
+    /// are still reported; occupancy lives on the map.
+    public func tilesCovered(on map: WorldMap) -> [TileIndex] {
+        map.tilesCovered(anchor: anchor, footprint: kind.footprint)
     }
 }
 
