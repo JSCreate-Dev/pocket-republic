@@ -97,7 +97,12 @@ public enum SimulationEngine {
             let scale = Int64(b.mode.outputPercent)
             switch b.kind {
             case .farm:
-                let bonus = s.map.terrain(at: b.tile) == .fertile ? s.config.fertileBonus : 0
+                let covered = b.tilesCovered(on: s.map)
+                let fertile = covered.reduce(into: 0) { count, tile in
+                    if s.map.terrain(at: tile) == .fertile { count += 1 }
+                }
+                let bonus = !covered.isEmpty && fertile * 2 >= covered.count
+                    ? s.config.fertileBonus : 0
                 let yield = Int64(workers * (s.config.farmYieldPerWorker + bonus)) * scale / 100
                 s.produceFood(at: b.id, Int32(yield))
             case .workshop, .dock:
@@ -114,24 +119,201 @@ public enum SimulationEngine {
         }
     }
 
-    /// Farms sell to the nearest road-connected market. Food moves, money moves back.
-    static func distributeFood(_ s: inout RepublicState) {
-        let markets = s.buildings.filter { $0.kind == .market }
-        guard !markets.isEmpty else { return }
-        for i in s.buildings.indices where s.buildings[i].kind == .farm {
-            let farm = s.buildings[i]
-            guard farm.foodStore > 0 else { continue }
-            guard let market = markets
-                .filter({ s.fields.areConnected(farm.tile, $0.tile) })
-                .min(by: { manhattan(s.map, farm.tile, $0.tile) < manhattan(s.map, farm.tile, $1.tile) })
-            else { continue }
+    /// How far a household is from food, measured at the door.
+    ///
+    /// The distance field is sampled on the house tile, which sits one step off the
+    /// road. A house whose only door is exactly `maxServiceDistance` from a market
+    /// therefore reads as max+1 and used to be treated as unreachable even though
+    /// the citizen can walk out onto an in-range road. The door distance is the
+    /// minimum of the floor tile and the adjacent road tiles.
+    static func marketServiceDistance(_ s: RepublicState, homeTile: TileIndex) -> UInt16 {
+        var best = s.fields.distance(.market, at: homeTile)
+        for n in s.map.neighbours(of: homeTile) where s.map.isRoad(at: n) {
+            best = min(best, s.fields.distance(.market, at: n))
+        }
+        return best
+    }
 
-            let moved = s.shipFood(from: farm.id, to: market.id,
-                                   min(farm.foodStore, s.config.farmToMarketShipPerDay))
-            if moved > 0 {
-                s.transfer(from: .building(market.id), to: .building(farm.id),
-                           Int64(moved) * max(1, s.config.foodPrice / 2))
+    /// The market this household buys from, or nil when no door is in range.
+    /// In-range floor tiles keep the market the distance field already resolved.
+    /// Out-of-range floors fall back to the nearest in-range door so coverage and
+    /// purchasing stay the same fact.
+    static func shoppingMarket(_ s: RepublicState, homeTile: TileIndex) -> BuildingID? {
+        let cap = s.config.maxServiceDistance
+        if s.fields.distance(.market, at: homeTile) <= cap,
+           let id = s.fields.nearestMarket(at: homeTile) {
+            return id
+        }
+        var best = DistanceFields.unreachable
+        var chosen: BuildingID?
+        for n in s.map.neighbours(of: homeTile) where s.map.isRoad(at: n) {
+            let d = s.fields.distance(.market, at: n)
+            if d < best, let id = s.fields.nearestMarket(at: n) {
+                best = d
+                chosen = id
             }
+        }
+        guard best <= cap else { return nil }
+        return chosen
+    }
+
+    /// Farms sell into markets that still need food for the people who shop there.
+    ///
+    /// Shipping each farm's whole output to the single nearest market left other
+    /// markets empty (their customers went hungry) and made the lucky market pay
+    /// up front for food it could not sell. That till then could not pay its
+    /// shopkeepers, and farms delivering into a broke market could not pay their
+    /// farmers — employed citizens with empty pockets in front of full shelves.
+    /// Demand is filled first, leftover production is spread across markets that
+    /// can pay, and a market never spends the cash it needs for today's wages.
+    ///
+    /// Farms also take turns. Finishing one farm — demand and surplus — before
+    /// the next meant the lowest-index farms sold the whole daily budget. Once
+    /// multi-tile farms sit on the fertile patches and ship a full crew's yield,
+    /// that budget runs out around the twelfth farm, and every later crew works
+    /// a full barn for no pay. One unit per farm per round keeps the wage money
+    /// moving to every farm that actually delivered.
+    static func distributeFood(_ s: inout RepublicState) {
+        let marketIndices = s.buildings.indices.filter { s.buildings[$0].kind == .market }
+        guard !marketIndices.isEmpty else { return }
+        let need = s.config.foodPerCitizenPerDay
+        let unitCost = max(Int64(1), s.config.foodPrice / 2)
+
+        var shoppers = [Int32: Int32]()
+        for c in s.citizens where c.alive {
+            guard let home = c.home else { continue }
+            let tile = s.buildings[Int(home.raw)].tile
+            guard let market = shoppingMarket(s, homeTile: tile) else { continue }
+            shoppers[market.raw, default: 0] += 1
+        }
+
+        struct Stall {
+            var buildingIndex: Int
+            var id: BuildingID
+            var tile: TileIndex
+            var demand: Int32
+            var stock: Int32
+            var affordable: Int32
+            var received: Int32
+        }
+        var stalls: [Stall] = []
+        stalls.reserveCapacity(marketIndices.count)
+        for m in marketIndices {
+            let market = s.buildings[m]
+            let wage = (market.kind.isCivic ? s.policy.civicWage : s.config.privateWage)
+                * Int64(market.workers.count)
+            let spendable = market.funds - wage
+            let customers = shoppers[market.id.raw] ?? 0
+            stalls.append(Stall(buildingIndex: m,
+                                id: market.id,
+                                tile: market.tile,
+                                demand: customers * need,
+                                stock: market.foodStore,
+                                affordable: Int32(max(Int64(0), spendable) / unitCost),
+                                received: 0))
+        }
+
+        struct Lot {
+            var id: BuildingID
+            var tile: TileIndex
+            var remaining: Int32
+        }
+        var lots: [Lot] = []
+        for i in s.buildings.indices where s.buildings[i].kind == .farm {
+            let remaining = min(s.buildings[i].foodStore, s.config.farmToMarketShipPerDay)
+            guard remaining > 0 else { continue }
+            lots.append(Lot(id: s.buildings[i].id, tile: s.buildings[i].tile, remaining: remaining))
+        }
+        guard !lots.isEmpty else { return }
+
+        func wageReserve(_ stall: Stall) -> Int64 {
+            let b = s.buildings[stall.buildingIndex]
+            let rate = b.kind.isCivic ? s.policy.civicWage : s.config.privateWage
+            return rate * Int64(b.workers.count)
+        }
+
+        func pay(_ stallIndex: Int, farmID: BuildingID, moved: Int32) {
+            let bill = Int64(moved) * unitCost
+            let funds = s.buildings[stalls[stallIndex].buildingIndex].funds
+            let payable = min(bill, max(0, funds - wageReserve(stalls[stallIndex]))) / unitCost * unitCost
+            if payable > 0 {
+                s.transfer(from: .building(stalls[stallIndex].id), to: .building(farmID), payable)
+            }
+            let spent = Int32(payable / unitCost)
+            stalls[stallIndex].affordable = max(0, stalls[stallIndex].affordable - spent)
+        }
+
+        enum Phase { case shortfall, surplus }
+
+        func pickStall(for lot: Lot, phase: Phase) -> Int? {
+            var best: Int?
+            for n in stalls.indices {
+                guard s.fields.areConnected(lot.tile, stalls[n].tile) else { continue }
+                switch phase {
+                case .shortfall:
+                    guard stalls[n].demand > stalls[n].stock else { continue }
+                case .surplus:
+                    guard stalls[n].demand > 0, stalls[n].affordable > 0 else { continue }
+                }
+                guard let chosen = best else { best = n; continue }
+                if phase == .shortfall {
+                    let gap = stalls[n].demand - stalls[n].stock
+                    let bestGap = stalls[chosen].demand - stalls[chosen].stock
+                    if gap != bestGap {
+                        if gap > bestGap { best = n }
+                        continue
+                    }
+                } else if stalls[n].received != stalls[chosen].received {
+                    if stalls[n].received < stalls[chosen].received { best = n }
+                    continue
+                }
+                let distance = manhattan(s.map, lot.tile, stalls[n].tile)
+                let bestDistance = manhattan(s.map, lot.tile, stalls[chosen].tile)
+                if distance != bestDistance {
+                    if distance < bestDistance { best = n }
+                    continue
+                }
+                if stalls[n].id < stalls[chosen].id { best = n }
+            }
+            return best
+        }
+
+        /// One unit per farm per pass. A bigger chunk lets the first farm drain
+        /// the till before the last farm in the same pass is offered a sale.
+        func shipRound(_ phase: Phase) -> Bool {
+            var shipped = false
+            for f in lots.indices {
+                guard lots[f].remaining > 0 else { continue }
+                guard let n = pickStall(for: lots[f], phase: phase) else { continue }
+                let cap = phase == .shortfall
+                    ? stalls[n].demand - stalls[n].stock
+                    : stalls[n].affordable
+                guard cap > 0 else { continue }
+                let moved = s.shipFood(from: lots[f].id, to: stalls[n].id, 1)
+                guard moved > 0 else { continue }
+                pay(n, farmID: lots[f].id, moved: moved)
+                stalls[n].stock += moved
+                stalls[n].received += moved
+                lots[f].remaining -= moved
+                shipped = true
+            }
+            return shipped
+        }
+
+        // Cover today's shoppers first. A market that cannot prepay still
+        // receives the shortfall: sales cash arrives only after this phase.
+        var shortfallPasses = 0
+        let shortfallLimit = lots.reduce(0) { $0 + Int($1.remaining) } + 1
+        while shortfallPasses < shortfallLimit && shipRound(.shortfall) {
+            shortfallPasses += 1
+        }
+
+        // Leftover production is sold only for cash, least-served market first,
+        // still alternating farms so the wage bill can be met on every farm.
+        var surplusPasses = 0
+        let surplusLimit = lots.reduce(0) { $0 + Int($1.remaining) } + 1
+        while surplusPasses < surplusLimit && shipRound(.surplus) {
+            surplusPasses += 1
         }
     }
 
@@ -154,13 +336,8 @@ public enum SimulationEngine {
         for i in s.citizens.indices {
             guard s.citizens[i].alive, let home = s.citizens[i].home else { continue }
             let homeTile = s.buildings[Int(home.raw)].tile
-            let did = s.citizens[i].district
-
-            _ = did
-            // "Which market" and "how far" come from the same traversal, so a citizen
-            // counted as covered can always actually buy.
-            guard let marketID = s.fields.nearestMarket(at: homeTile),
-                  s.fields.distance(.market, at: homeTile) <= s.config.maxServiceDistance else {
+            // Same door the coverage stats use, so a citizen counted as in range can buy.
+            guard let marketID = shoppingMarket(s, homeTile: homeTile) else {
                 s.citizens[i].daysHungry += 1
                 continue
             }
@@ -258,7 +435,7 @@ public enum SimulationEngine {
                 d.causes.append(CauseFactor(.foodShortage, value: c.daysHungry, detail: "days hungry"))
                 grievance = true
             }
-            let marketDist = s.fields.distance(.market, at: homeTile)
+            let marketDist = marketServiceDistance(s, homeTile: homeTile)
             if marketDist > maxD {
                 d.happiness -= cfg.noMarketAccessPenalty
                 d.loyalty -= cfg.noMarketAccessPenalty / 2
@@ -366,7 +543,7 @@ public enum SimulationEngine {
             if c.work == nil { jobless[d] += 1 }
             guard let home = c.home else { continue }
             let t = s.buildings[Int(home.raw)].tile
-            if s.fields.distance(.market, at: t) <= maxD { mkt[d] += 1 }
+            if shoppingMarket(s, homeTile: t) != nil { mkt[d] += 1 }
             if s.fields.distance(.clinic, at: t) <= maxD { clin[d] += 1 }
             if s.fields.distance(.police, at: t) <= maxD { pol[d] += 1 }
         }
@@ -451,7 +628,7 @@ public enum SimulationEngine {
             if corrupt > 60 { tally[base + 4] += 1 }
             if let home = c.home {
                 let t = s.buildings[Int(home.raw)].tile
-                if s.fields.distance(.market, at: t) > maxD { tally[base + 5] += 1 }
+                if shoppingMarket(s, homeTile: t) == nil { tally[base + 5] += 1 }
                 if s.fields.distance(.police, at: t) > maxD { tally[base + 6] += 1 }
                 if s.fields.distance(.clinic, at: t) > maxD { tally[base + 7] += 1 }
             }

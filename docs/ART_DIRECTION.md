@@ -9,7 +9,7 @@ A sunny, slightly tongue-in-cheek tropical island republic: think a cozy toy-dio
 - **Projection:** 2:1 isometric, matching the current 64x32 tile grid in `IslandScene.swift`. Light comes from the top-left; shadows fall bottom-right.
 - **Rendering:** clean flat shapes with one level of soft shading (a light face, a shadow face, and a roof). Thin darker outline on the outside silhouette only. No photoreal textures or noise.
 - **Readability first:** every building has to be identifiable by silhouette and roof color at the farthest zoom. Avoid fine detail that turns to mush below about 40 px.
-- **Scale:** buildings sit on whole-tile footprints, sized from the Game Designer spec. Sprite canvas width = footprint width in tiles x 64 px (art at @3x for device, so 192 px per tile).
+- **Scale:** buildings sit on whole-tile footprints, sized from the Game Designer spec. A W×H footprint is (W+H)×32 px wide at 1x, with the base diamond (W+H)×16 tall, anchored at the front (south) corner.
 - **Anchor:** the sprite's anchor is the bottom (south) corner of its footprint diamond, so z-sorting by `x + y` keeps working.
 
 ## Palette

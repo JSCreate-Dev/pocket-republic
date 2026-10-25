@@ -42,6 +42,7 @@ public struct DistanceFields: Codable, Sendable {
         var sourcesByService: [UInt8: [TileIndex]] = [:]
         for b in buildings {
             guard let s = b.provides else { continue }
+            // `tile` is the entrance: the only footprint cell connected to the roads.
             sourcesByService[s.rawValue, default: []].append(b.tile)
         }
         var next = [[UInt16]](repeating: [], count: ServiceKind.allCases.count)
