@@ -28,6 +28,7 @@ struct MainView: View {
         NavigationStack {
             IslandView()
                 .navigationTitle("Pocket Republic")
+                .navigationBarTitleDisplayMode(.inline)
         }
     }
 
