@@ -10,7 +10,7 @@ Jordan wants Pocket Republic to feel like a lively, living world with a real gam
 
 ## Current state
 
-Snapshot of main `3b88a5c` (PR #1, which includes PRs #2 and #3) plus art batch 2 on this branch (PR #6), read against the tree on 2026-10-25. This environment has no Swift toolchain, no Xcode, and no iPhone, so tests, the asset-catalog compile, and the device build were not re-run here.
+Snapshot of this branch after merging main `b960f52` (PR #2 `dd87c6e` and PR #3), plus art direction v1 and the app icon, read against the code on 2026-10-25. This environment has no Swift toolchain, no Xcode, and no iPhone, so tests, the asset-catalog compile, and the device build were not re-run here.
 
 ### What works
 
@@ -39,7 +39,7 @@ Jordan's iPhone playtest is recorded below. Which binary that was, and whether C
 ### Known issues
 
 - **Hunger with food surplus.** [PocketRepublicCore/README.md](PocketRepublicCore/README.md) records a 200-day unattended run (the same shape as `EconomyReportTests.testPrintEconomyReport`: seed 2026, 250 citizens, `autoResolve` picking option 0) in which 47 of 250 citizens are hungry (~19%) while production is about 372/day against 250/day needed and about 164/day spoils. The test prints those lines and does not assert them, and this pass did not re-run it. The mechanism in `feedCitizens` matches that diagnosis: a citizen goes hungry when the home tile has no market inside `maxServiceDistance`, the market lacks a full ration, or the citizen cannot pay `foodPrice` (a short payment is refunded). `spoil` then removes `marketSpoilagePercent` of each farm and market store. Supply is in surplus on paper; distribution and affordability leave people hungry.
-- **One-tile buildings; the scene still draws placeholders.** `WorldMap.buildingAt` stores one building id per tile. `IslandScene` still draws procedural 64×32 terrain diamonds, a flat road fill, UIColor building blocks (26×23 pt, town hall 26×32), and dot walkers. Batch 2 art is in the catalog and not loaded yet: `Terrain/`, `Roads/`, `Decorations/`, `Walkers/`, and `UI/` (`provides-namespace` false). Specs are `docs/art/ASSETS.md` and `docs/art/UI_STYLE.md`. This branch still has no building imagesets (that is PR #4). The app icon is `PocketRepublic/Assets.xcassets/AppIcon.appiconset/AppIcon-1024.png` (1024×1024, 8-bit RGB, no alpha), selected with `ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon` on the app target. Style rules are in [docs/ART_DIRECTION.md](docs/ART_DIRECTION.md).
+- **One-tile buildings, placeholder building art.** `WorldMap.buildingAt` stores one building id per tile. Sprites are flat UIColor blocks; there are no building images. The app icon is `PocketRepublic/Assets.xcassets/AppIcon.appiconset/AppIcon-1024.png` (1024×1024, 8-bit RGB, no alpha), selected with `ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon` on the app target. Style rules are in [docs/ART_DIRECTION.md](docs/ART_DIRECTION.md).
 - **Placeholder bundle id** `com.example.PocketRepublic` on Debug and Release.
 - **Legacy save left behind.** `pocket.republic.save.v1` is detected and never migrated.
 - **Inspect is a tile caption.** Tapping a placed building does not show workers, residents, food, funds, mode, or actions.
@@ -68,9 +68,7 @@ Section 3 specifies the decree card (title, flavor, cost or Free, faction chips,
 
 ### Art on this branch
 
-[docs/ART_DIRECTION.md](docs/ART_DIRECTION.md) is v1: a sunny isometric toy-diorama, town hall as the visual anchor, palette, and the app-icon description. The icon file is in the asset catalog. Building sprites are not (PR #4). Footprint sizes and the 1x sprite base now come from [docs/DESIGN.md](docs/DESIGN.md); the art doc's earlier hold was waiting on that recommendation.
-
-Batch 2 on this branch adds terrain, shore foam, road autotiles, decorations, walkers, a cart, and UI icons. The lists and the road bitmask live in `docs/art/ASSETS.md`; the HUD, decree cards, Gazette, citizen rows, and inspect panel live in `docs/art/UI_STYLE.md`. Those notes stay in `docs/art/` alongside `docs/ART_DIRECTION.md`. The road names match `IslandScene.point(x:y:)` and were not renamed. PR #4 also edits this file, so the progress logs need folding whichever merges second.
+[docs/ART_DIRECTION.md](docs/ART_DIRECTION.md) is v1: a sunny isometric toy-diorama, town hall as the visual anchor, palette, and the app-icon description. The icon file is in the asset catalog. Building sprites are not. Footprint sizes and the 1x sprite base now come from [docs/DESIGN.md](docs/DESIGN.md); the art doc's earlier hold was waiting on that recommendation.
 
 ### Ownership (locked)
 
@@ -97,7 +95,7 @@ Jordan tested on an iPhone. No art assets were in that build.
 Built on Game Logic's core API, after the core PR merges.
 
 - Ghost preview: green or red, reason from `IntentRejection`, service reach for market, clinic, school, and police.
-- Render footprints from the core sizes and `tilesCovered`, including the sprite base in [docs/DESIGN.md](docs/DESIGN.md). For batch 2, pick terrain variants with a deterministic hash of the tile index, draw `road_*` overlays from the bitmask in `docs/art/ASSETS.md`, use `nearest` filtering for walkers and flip the other two directions with `xScale`, and keep the hungry orange tint. Use `docs/art/UI_STYLE.md` for the HUD pill, decree cards, Gazette feed, citizen rows, and inspect panel. Move the island toward the Duo postures in the design doc (unfolded map plus panel, folded bottom sheet, selection and camera kept).
+- Render footprints from the core sizes and `tilesCovered`, including the sprite base in [docs/DESIGN.md](docs/DESIGN.md). Move the island toward the Duo postures in that doc (unfolded map plus panel, folded bottom sheet, selection and camera kept).
 - Inspect panel contents from the design doc, using fields the core already tracks.
 - Decree cards and the newspaper event feed from section 3: title, flavor, cost or Free, faction chips, plain-language effects, **Issue decree** / **Not now**, and stories grouped by kind, district, and day with a because-line, names, and **Show me**.
 - CI and device build: get `.github/workflows/unsigned-ipa.yml` green on `xcode-27`, update the README toolchain lines so they match the workflow, and replace bundle id `com.example.PocketRepublic` when signing needs a real id.
@@ -117,8 +115,7 @@ The core PR merges first.
 
 ### Visual And Grapchics
 
-- Batch 2 terrain, shore foam, road autotiles, decorations, walkers, the cart, and UI icons are in the catalog. Specs are `docs/art/ASSETS.md`, `docs/art/UI_STYLE.md`, `docs/art/road_autotile.json`, and `docs/art/decos.json`. The scene does not load them. Known gaps: no blend between terrain types, faint roads on sand, and the style-sheet mockup substitutes fonts for SF Pro Rounded.
-- Building sprites sized from the footprint table and sprite-base formula in [docs/DESIGN.md](docs/DESIGN.md), in the style of [docs/ART_DIRECTION.md](docs/ART_DIRECTION.md), are PR #4, not this branch. The island still draws flat color blocks. The 3×2 and 2×3 sprites in that set are drawn on square bases.
+- Building sprites sized from the footprint table and sprite-base formula in [docs/DESIGN.md](docs/DESIGN.md), in the style of [docs/ART_DIRECTION.md](docs/ART_DIRECTION.md). The island still draws flat color blocks. Footprint sizes are settled, so this is no longer waiting on the Game Designer recommendation.
 - The app icon is in the catalog (see Known issues). It has not been compiled with `actool`.
 
 ### Later / backlog
@@ -126,12 +123,6 @@ The core PR merges first.
 - Player-customizable iPhone Duo layouts (choose what each panel shows, for example map, inspect, agenda, or stats). Owner: Ios Dev. Deferred by Jordan until performance and game feel are optimized.
 
 ## Log
-
-### 2026-10-25 11:34 AM EDT — Visual And Grapchics — `cursor/terrain-roads-walkers-ui-5b58` (PR #6)
-
-- **Changed:** Merged `origin/main` at `3b88a5c` (PR #1) with a merge commit after this branch was cut from `b960f52`. Kept this file from main and added this entry. Added 94 imagesets under `PocketRepublic/Assets.xcassets/` in `Terrain/` (31), `Roads/` (16), `Decorations/` (14), `Walkers/` (26), and `UI/` (7), each folder with `provides-namespace` false. Added `docs/art/ASSETS.md`, `UI_STYLE.md`, `road_autotile.json`, `decos.json`, `terrain_preview.png`, `ui_style_sheet.png`, and `ui_style_sheet.html`. Generator scripts are in `tools/art/`. No Swift edits on this branch.
-- **Verified:** Every imageset PNG is 8-bit RGBA with an alpha channel (terrain diamonds are opaque inside the tile and transparent in the corners). Every `Contents.json` parses. The road bitmask matches `IslandScene.point(x:y:)`: N=1 is (x, y−1) up-right, E=2 is (x+1, y) down-right, S=4 is (x, y+1) down-left, W=8 is (x−1, y) up-left, so the road assets were not renamed. Largest new file is `docs/art/terrain_preview.png` at about 1.1 MB; the batch is about 2.7 MB. Nothing exceeds GitHub's 100 MB file limit. No Swift toolchain, Xcode, or iPhone here, so `swift test`, `actool`, and the device build were not run.
-- **Next:** Ios Dev wires the art. Pick terrain variants by a deterministic hash of the tile index, draw roads as overlays chosen by the bitmask, use `nearest` filtering for walkers and flip them with `xScale` for the other two directions, keep the hungry orange tint, and follow `docs/art/UI_STYLE.md` for the HUD pill, decree cards, Gazette event feed, citizen rows, and inspect panel. Game Logic's footprint-core PR still merges before the footprint renderer. Known gaps: no blending between terrain types, faint roads on sand, mockup fonts substituted for SF Pro Rounded, and the 3×2/2×3 building sprites still on square bases (PR #4).
 
 ### 2026-10-25 11:28 AM EDT — Visual And Grapchics — `cursor/art-direction-and-icon-108e` (PR #1)
 
