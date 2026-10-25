@@ -62,6 +62,10 @@ PR #1 added [docs/ART_DIRECTION.md](docs/ART_DIRECTION.md) and the 1024×1024 ap
 
 A valid city is `Application Support/PocketRepublic/spatial-v1.json` (envelope `formatVersion` 1, checksum `stateHash()`, `RepublicState.schemaVersion` 2), written atomically. A corrupt or unsupported file is kept and blocks play until **Start New City**. The app reads the `UserDefaults` key `pocket.republic.save.v1` only to detect the old prototype. It never decodes or migrates it. A new city draws `worldSeed` once with `UInt64.random` at the app boundary (`Game.freshState`). After that, `worldSeed` and `rng` live in the saved state.
 
+### Construction stages (spec only, this branch)
+
+[docs/DESIGN.md](docs/DESIGN.md) section 7 is the construction-stage spec for next round item 1. Three stages: `foundation`, `scaffold`, `complete`. Build time is 2 days for a house, 3 for police, market, workshop and farm, 4 for clinic, school and dock, and 0 for the town hall, all in `BalanceConfig.constructionDaysByKind` with a `constructionDaysMultiplierPercent` (0 reproduces today's instant build) and a `constructionFoundationPercent` split. The core stores two `Int32`s per building, days done and days required, and derives stage and a 0-to-1 progress; no `Double` and no dictionary enters the save. A site claims its tiles at placement, is charged its full build cost there, and until it opens has no workers, residents, production, food, upkeep, wages or service reach. `advanceConstruction` is a new step at the top of `advance`, before the `fields.dirty` check, so a building that completes on day N is a service source that same day. `buildingConstructed` moves to completion day and a new `EventKind.buildingSiteStarted` fires at placement. `RepublicState.schemaVersion` goes 2 to 3, so a schema 2 save does not decode. Section 7.6 specifies 8 new imagesets, foundation and scaffold for each of the four footprint shapes, at the same `(W+H)×32` width and `(0.5, 0)` anchor as the finished sprites, with 3×2 and 2×3 drawn separately. Nothing is implemented: no `ConstructionStage` type, no new `BalanceConfig` fields, no site art, no stage rendering.
+
 ### Spec that is not built
 
 [docs/DESIGN.md](docs/DESIGN.md) sections 4, 5, and 6 are spec only. There is no `CitizenMind` or `Narrator` type in the core. Section 4 is citizen needs, traits, opinion of El Presidente, gossip, and choices with visible causes, plus the seeded-roll contract. Section 5 is a 14-event random deck and rare one-off events. Section 6 is the small on-device model: it may pick among options the core has already validated and write flavor text, the answer used is written into the save, and the rule-based mind is the fallback. The minimum target stays iOS 17.
@@ -93,7 +97,7 @@ Finished, and not open: multi-tile footprints (PR #12), the surplus hunger fix (
 
 ### Game Designer
 
-Write the construction-stage spec and timings (next round 1). [docs/DESIGN.md](docs/DESIGN.md) stays the source of truth, including sections 4–6 when their turn arrives.
+The construction-stage spec and timings (next round 1) are written: [docs/DESIGN.md](docs/DESIGN.md) section 7, with the core fields and tick-order change in 7.10, the art list in 7.6, the stage rendering and pop in 7.7, and the test expectations in 7.12. Game Logic, Visual And Grapchics and Ios Dev can start from that. [docs/DESIGN.md](docs/DESIGN.md) stays the source of truth, including sections 4–6 when their turn arrives.
 
 ### Game Logic
 
@@ -109,7 +113,7 @@ Stage rendering and the finished pop, after the spec and the core state exist (n
 
 ## Next round (priority order)
 
-1. **Tropico-style construction stages.** A placed building rises in real time through foundation, then scaffold with builders, then the finished building with a pop. It does not function while it is under construction. The core stores whole days done and days needed for each stage, and it exposes progress as a number from 0 to 1. Game Designer writes the spec and the timings. Game Logic owns the core state. Visual And Grapchics draws the foundation and scaffold sprites for each footprint size, using the same (W+H)×32 width and the same anchor as the finished sprite. Ios Dev renders the stages and the pop.
+1. **Tropico-style construction stages.** A placed building rises in real time through foundation, then scaffold with builders, then the finished building with a pop. It does not function while it is under construction. The core stores whole days done and days needed for each stage, and it exposes progress as a number from 0 to 1. Game Designer has written the spec and the timings ([docs/DESIGN.md](docs/DESIGN.md) section 7). Game Logic owns the core state. Visual And Grapchics draws the foundation and scaffold sprites for each footprint size, using the same (W+H)×32 width and the same anchor as the finished sprite. Ios Dev renders the stages and the pop.
 
 2. **PR #10, the diorama HUD, decree cards, and the gazette.** That pull request is unfinished and parked. It is the presentation pass for design section 3: the map-forward Duo layout, decree cards, and the newspaper-style event feed. Leave it parked until the lead picks it up. Do not rebase it onto a side branch.
 
