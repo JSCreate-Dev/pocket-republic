@@ -1,0 +1,3 @@
+// Single source of truth for the Pocket Republic bundle identifier.
+// Debug and Release both include this file. Change the ID here only.
+PRODUCT_BUNDLE_IDENTIFIER = com.jscreate.pocketrepublic

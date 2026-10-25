@@ -33,7 +33,11 @@ public enum WorldGenerator {
                 let kind: TerrainKind
                 if edge < 3 { kind = .water }
                 else if edge < 5 { kind = .sand }
-                else if (x &* 7 &+ y &* 13) % 11 < 3 { kind = .fertile }
+                // Speckle alone never puts five fertile tiles in any 3×3, so a farm
+                // (at least half its footprint fertile) could not be placed. The
+                // extra term paints 4×4 patches where the block hash is 0 mod 3.
+                else if (x &* 7 &+ y &* 13) % 11 < 3
+                    || ((x / 4) &* 3 &+ (y / 4) &* 5) % 3 == 0 { kind = .fertile }
                 else if (x &* 3 &+ y &* 5) % 23 == 0 { kind = .rock }
                 else { kind = .grass }
                 map.terrain[Int(t.raw)] = kind.rawValue
@@ -87,7 +91,11 @@ public enum WorldGenerator {
         for i in [0, 2, 4, 6, 8] {
             _ = place(&state, .police, near: state.districts[i].centroid)
         }
-        _ = place(&state, .dock, near: state.map.index(x: mid, y: size - 7))
+        // Dock is 2×3 with no rotation, so its long sides face east and west.
+        // Park the right edge on the eastern water margin.
+        let dockX = size - 5
+        let dockY = (mid / 6) * 6 + 2
+        _ = place(&state, .dock, near: state.map.index(x: dockX, y: dockY))
 
         let farmCount = max(5, citizenCount / 14)
         for _ in 0..<farmCount {
@@ -161,40 +169,53 @@ public enum WorldGenerator {
         return nil
     }
 
-    /// Place on the first buildable, unoccupied, non-road tile at or near `target`,
-    /// spiralling outward. Deterministic.
+    /// Place on the first legal footprint whose anchor is at or near `target`,
+    /// spiralling outward in the same ring order as a square scan. Radius is capped
+    /// so a miss stays cheap: housing retries thousands of times. 48 tiles reaches
+    /// a fertile patch or the shore without walking the whole island. Deterministic.
     @discardableResult
     static func place(_ s: inout RepublicState, _ kind: BuildingKind, near target: TileIndex) -> BuildingID? {
         let tx = s.map.x(of: target), ty = s.map.y(of: target)
-        for radius in 0..<12 {
-            for dy in -Int32(radius)...Int32(radius) {
-                for dx in -Int32(radius)...Int32(radius) {
-                    guard max(abs(dx), abs(dy)) == Int32(radius) || radius == 0 else { continue }
-                    let x = tx + dx, y = ty + dy
-                    guard s.map.contains(x: x, y: y) else { continue }
-                    let t = s.map.index(x: x, y: y)
-                    guard s.map.terrain(at: t).buildable,
-                          s.map.building(at: t) == nil,
-                          !s.map.isRoad(at: t),
-                          touchesRoad(s.map, t) else { continue }
-                    return construct(&s, kind, at: t)
+        let limit = min(48, Int(max(s.map.width, s.map.height)))
+        for radius in 0..<limit {
+            let r = Int32(radius)
+            for dx in -r...r {
+                if let id = tryPlace(&s, kind, tx + dx, ty - r) { return id }
+            }
+            if r > 0 {
+                for dy in (-r + 1)...(r - 1) {
+                    if let id = tryPlace(&s, kind, tx - r, ty + dy) { return id }
+                    if let id = tryPlace(&s, kind, tx + r, ty + dy) { return id }
+                }
+                for dx in -r...r {
+                    if let id = tryPlace(&s, kind, tx + dx, ty + r) { return id }
                 }
             }
         }
         return nil
     }
 
-    static func touchesRoad(_ map: WorldMap, _ t: TileIndex) -> Bool {
-        map.neighbours(of: t).contains { map.isRoad(at: $0) }
+    private static func tryPlace(_ s: inout RepublicState, _ kind: BuildingKind,
+                                 _ x: Int32, _ y: Int32) -> BuildingID? {
+        guard s.map.contains(x: x, y: y) else { return nil }
+        let anchor = s.map.index(x: x, y: y)
+        guard let entrance = FootprintRules.assess(kind, anchoredAt: anchor, on: s.map).entrance else {
+            return nil
+        }
+        return construct(&s, kind, anchor: anchor, entrance: entrance)
     }
 
-    static func construct(_ s: inout RepublicState, _ kind: BuildingKind, at t: TileIndex) -> BuildingID {
+    static func construct(_ s: inout RepublicState, _ kind: BuildingKind,
+                          anchor: TileIndex, entrance: TileIndex) -> BuildingID {
         let id = BuildingID(s.nextBuildingRaw)
         s.nextBuildingRaw += 1
-        let b = Building(id: id, kind: kind, tile: t,
-                         district: s.map.district(at: t), builtOnDay: s.day)
-        s.buildings.append(b)
-        s.map.buildingAt[Int(t.raw)] = id.raw
+        let building = Building(id: id, kind: kind, anchor: anchor, entrance: entrance,
+                                district: s.map.district(at: entrance), builtOnDay: s.day)
+        s.buildings.append(building)
+        for tile in building.tilesCovered(on: s.map) {
+            s.map.buildingAt[Int(tile.raw)] = id.raw
+            s.map.entranceAt[Int(tile.raw)] = tile == entrance
+        }
         s.fields.markDirty()
         return id
     }

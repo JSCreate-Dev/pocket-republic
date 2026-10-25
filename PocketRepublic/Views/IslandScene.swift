@@ -34,9 +34,12 @@ final class IslandScene: SKScene {
     private var framing: CameraFraming?
     private var touchStart: CGPoint?
     private var wasDragged = false
+    private let selectionLayer = SKNode()
+    private var selectionNodes: [Int32: SKShapeNode] = [:]
+    private var selectedBuildingID: BuildingID?
 
-    private let halfWidth: CGFloat = 32
-    private let halfHeight: CGFloat = 16
+    private let halfWidth: CGFloat = CGFloat(CityProjection.halfWidth)
+    private let halfHeight: CGFloat = CGFloat(CityProjection.halfHeight)
 
     override init(size: CGSize) {
         super.init(size: size)
@@ -45,11 +48,13 @@ final class IslandScene: SKScene {
         terrainLayer.zPosition = 0
         reachLayer.zPosition = 5
         buildingLayer.zPosition = 10
+        selectionLayer.zPosition = 15
         ghostLayer.zPosition = 20
         peopleLayer.zPosition = 30
         addChild(terrainLayer)
         addChild(reachLayer)
         addChild(buildingLayer)
+        addChild(selectionLayer)
         addChild(ghostLayer)
         addChild(peopleLayer)
         addChild(cameraNode)
@@ -181,12 +186,7 @@ final class IslandScene: SKScene {
     }
 
     private func tile(at position: CGPoint, in map: WorldMap) -> TileIndex? {
-        let sx = position.x / halfWidth
-        let sy = -position.y / halfHeight
-        let x = Int32(((sx + sy) / 2).rounded())
-        let y = Int32(((sy - sx) / 2).rounded())
-        guard map.contains(x: x, y: y) else { return nil }
-        return map.index(x: x, y: y)
+        BuildingHitTest.tile(at: CityPoint(x: Double(position.x), y: Double(position.y)), in: map)
     }
 
     private func viewport(in map: WorldMap) -> TileRect {
@@ -261,6 +261,53 @@ final class IslandScene: SKScene {
             buildingNodes.removeValue(forKey: id)
         }
         refreshPeople(state: state, rect: rect)
+        refreshSelection()
+    }
+
+    /// Highlights every tile `BuildingOccupancy` assigns to the building, not only its origin.
+    func setSelection(_ id: BuildingID?) {
+        let pulse = id != nil && id != selectedBuildingID
+        selectedBuildingID = id
+        refreshSelection(pulse: pulse)
+    }
+
+    private func refreshSelection(pulse: Bool = false) {
+        guard let state = renderedState else {
+            for (_, node) in selectionNodes { node.removeFromParent() }
+            selectionNodes.removeAll()
+            return
+        }
+        let tiles = selectedBuildingID.map { BuildingHitTest.occupiedTiles($0, on: state.map) } ?? []
+        let wanted = Set(tiles.map(\.raw))
+        for tile in tiles where selectionNodes[tile.raw] == nil {
+            let node = SKShapeNode(path: selectionDiamond())
+            node.fillColor = UIColor.systemMint.withAlphaComponent(0.33)
+            node.strokeColor = .white
+            node.lineWidth = 2
+            node.position = point(for: tile, in: state.map)
+            node.zPosition = 1
+            node.isUserInteractionEnabled = false
+            selectionLayer.addChild(node)
+            selectionNodes[tile.raw] = node
+            if pulse {
+                node.setScale(1.08)
+                node.run(.scale(to: 1, duration: 0.12))
+            }
+        }
+        for (raw, node) in selectionNodes where !wanted.contains(raw) {
+            node.removeFromParent()
+            selectionNodes.removeValue(forKey: raw)
+        }
+    }
+
+    private func selectionDiamond() -> CGPath {
+        let path = CGMutablePath()
+        path.move(to: CGPoint(x: 0, y: halfHeight))
+        path.addLine(to: CGPoint(x: halfWidth, y: 0))
+        path.addLine(to: CGPoint(x: 0, y: -halfHeight))
+        path.addLine(to: CGPoint(x: -halfWidth, y: 0))
+        path.closeSubpath()
+        return path
     }
 
     private func texture(for terrain: TerrainKind, road: Bool) -> SKTexture {
@@ -440,7 +487,7 @@ final class IslandScene: SKScene {
             reason = rejection.playerFacingReason
         }
         let key = GhostDrawKey(kind: kind.rawValue, origin: origin.raw, accepted: accepted,
-                               reason: reason, entrance: preview.entrance.raw,
+                               reason: reason, entrance: preview.entrance?.raw,
                                tileCount: preview.tiles.count, stamp: placementStamp(state))
         if key == lastGhostKey { return }
         lastGhostKey = key
@@ -486,9 +533,9 @@ final class IslandScene: SKScene {
             ghostLayer.addChild(badge)
         }
 
-        guard kind.showsServiceReach else { return }
+        guard kind.showsServiceReach, let entrance = preview.entrance else { return }
         let covered = Set(tiles.map(\.raw))
-        let reach = ServiceReach.tiles(from: preview.entrance,
+        let reach = ServiceReach.tiles(from: entrance,
                                        maxDistance: state.config.maxServiceDistance,
                                        on: map)
         for tile in reach where !covered.contains(tile.raw) {
@@ -617,7 +664,7 @@ private struct GhostDrawKey: Equatable {
     var origin: Int32
     var accepted: Bool
     var reason: String?
-    var entrance: Int32
+    var entrance: Int32?
     var tileCount: Int
     var stamp: Int
 }

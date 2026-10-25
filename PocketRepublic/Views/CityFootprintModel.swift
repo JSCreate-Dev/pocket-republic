@@ -4,80 +4,66 @@ import PocketRepublicCore
 
 /// What the island needs from the footprint core: size, covered tiles, the
 /// entrance, which building occupies a tile, and a placement check that does
-/// not change the live city.
-///
-/// `LegacyOneTileFootprintModel` is a temporary stand-in. The simulation still
-/// stores one tile per building. When Game Logic's API lands, replace
-/// `CityFootprints.current` and leave the call sites alone. This type does not
-/// decide `isPassable` or walker routes.
+/// not change the live city. This type does not decide `isPassable` or walker routes.
 protocol CityFootprintModel {
     func footprintWidth(_ kind: BuildingKind) -> Int
     func footprintDepth(_ kind: BuildingKind) -> Int
     func tilesCovered(by building: Building, on map: WorldMap) -> [TileIndex]
     func tilesCovered(placing kind: BuildingKind, at origin: TileIndex, on map: WorldMap) -> [TileIndex]
     func entranceTile(of building: Building, on map: WorldMap) -> TileIndex
-    func entranceTile(placing kind: BuildingKind, at origin: TileIndex, on map: WorldMap) -> TileIndex
     func buildingID(at tile: TileIndex, on map: WorldMap) -> BuildingID?
-    func checkPlacement(of kind: BuildingKind, at origin: TileIndex, in state: RepublicState) -> IntentResult
+    func checkPlacement(of kind: BuildingKind, at origin: TileIndex, in state: RepublicState) -> PlacementValidation
 }
 
 struct PlacementGhost {
     var result: IntentResult
     var tiles: [TileIndex]
-    var entrance: TileIndex
+    /// Door tile from `.valid(entrance:)`. Absent when placement is rejected.
+    var entrance: TileIndex?
 }
 
 extension CityFootprintModel {
     func placementGhost(of kind: BuildingKind, at origin: TileIndex, in state: RepublicState) -> PlacementGhost {
-        PlacementGhost(
-            result: checkPlacement(of: kind, at: origin, in: state),
-            tiles: tilesCovered(placing: kind, at: origin, on: state.map),
-            entrance: entranceTile(placing: kind, at: origin, on: state.map)
-        )
+        let tiles = tilesCovered(placing: kind, at: origin, on: state.map)
+        switch checkPlacement(of: kind, at: origin, in: state) {
+        case .valid(let entrance):
+            return PlacementGhost(result: .accepted, tiles: tiles, entrance: entrance)
+        case .rejected(let reason):
+            return PlacementGhost(result: .rejected(reason), tiles: tiles, entrance: nil)
+        }
     }
 }
 
 enum CityFootprints {
-    /// Temporary. Point this at the core adapter when `tilesCovered`, the
-    /// entrance tile, occupancy, and a side-effect-free placement check exist.
-    static let current: any CityFootprintModel = LegacyOneTileFootprintModel()
+    static let current: any CityFootprintModel = CoreFootprintModel()
 }
 
-/// TEMPORARY STUB. Every building is the single `Building.tile` the core stores
-/// today. Placement validity is `SimulationEngine.apply` on a copy, so the live
-/// city is unchanged. Delete this type when the core footprint API lands.
-struct LegacyOneTileFootprintModel: CityFootprintModel {
-    func footprintWidth(_: BuildingKind) -> Int { 1 }
-    func footprintDepth(_: BuildingKind) -> Int { 1 }
+/// Reads footprint geometry and placement from PocketRepublicCore. The anchor is
+/// the lowest-x, lowest-y tile; the footprint extends in +x and +y.
+struct CoreFootprintModel: CityFootprintModel {
+    func footprintWidth(_ kind: BuildingKind) -> Int { Int(kind.footprint.width) }
+    func footprintDepth(_ kind: BuildingKind) -> Int { Int(kind.footprint.height) }
 
     func tilesCovered(by building: Building, on map: WorldMap) -> [TileIndex] {
-        guard contains(building.tile, map) else { return [] }
-        return [building.tile]
+        map.tilesCovered(anchor: building.anchor, footprint: building.kind.footprint)
     }
 
-    func tilesCovered(placing _: BuildingKind, at origin: TileIndex, on map: WorldMap) -> [TileIndex] {
-        guard contains(origin, map) else { return [] }
-        return [origin]
+    func tilesCovered(placing kind: BuildingKind, at origin: TileIndex, on map: WorldMap) -> [TileIndex] {
+        map.tilesCovered(anchor: origin, footprint: kind.footprint)
     }
 
-    func entranceTile(of building: Building, on _: WorldMap) -> TileIndex { building.tile }
-
-    func entranceTile(placing _: BuildingKind, at origin: TileIndex, on _: WorldMap) -> TileIndex {
-        origin
+    func entranceTile(of building: Building, on map: WorldMap) -> TileIndex {
+        let covered = tilesCovered(by: building, on: map)
+        return covered.first(where: { map.isEntrance($0) }) ?? building.entrance
     }
 
     func buildingID(at tile: TileIndex, on map: WorldMap) -> BuildingID? {
-        guard contains(tile, map) else { return nil }
-        return map.building(at: tile)
+        guard tile.raw >= 0, Int(tile.raw) < map.tileCount else { return nil }
+        return map.buildingAt(tile)
     }
 
-    func checkPlacement(of kind: BuildingKind, at origin: TileIndex, in state: RepublicState) -> IntentResult {
-        var copy = state
-        return SimulationEngine.apply(.placeBuilding(kind, at: origin), to: &copy)
-    }
-
-    private func contains(_ tile: TileIndex, _ map: WorldMap) -> Bool {
-        tile.raw >= 0 && Int(tile.raw) < map.tileCount
+    func checkPlacement(of kind: BuildingKind, at origin: TileIndex, in state: RepublicState) -> PlacementValidation {
+        SimulationEngine.validatePlacement(kind, at: origin, in: state)
     }
 }
 
@@ -129,12 +115,15 @@ extension IntentRejection {
         case .notBuildable: return "You cannot build on this terrain."
         case .occupied: return "That tile is occupied."
         case .notConnectedToRoad: return "Buildings need an adjacent road."
+        case .notEnoughFertileLand: return "Farms need at least half their tiles on fertile land."
+        case .notTouchingWater: return "Docks need a long side against the water."
         case .insufficientTreasury: return "The treasury cannot afford that."
         case .noSuchBuilding: return "That building no longer exists."
         case .cannotDemolishTownHall: return "The town hall must remain."
         case .noPendingDecision, .decisionMismatch, .invalidOption, .noSuchAgendaItem:
             return "That decision is no longer available."
         case .crisisPendingBlocksBuilding: return "Resolve the crisis before building."
+        case .operatingModeNotOffered: return "That building has no operating mode."
         }
     }
 }
