@@ -99,7 +99,7 @@ struct IslandView: View {
                 toolStrip(compact: layout.compactTools, narrow: layout.mode == .singlePortrait)
             }
             Button { game.advance() } label: {
-                Label("Advance One Day", systemImage: "forward.fill")
+                Label(layout.mode == .singlePortrait ? "Next Day" : "Advance One Day", systemImage: "forward.fill")
                     .frame(maxWidth: .infinity, minHeight: 44)
             }
             .buttonStyle(.borderedProminent)
@@ -125,7 +125,7 @@ struct IslandView: View {
                 Spacer(minLength: 0)
             }
             HStack(spacing: 5) {
-                metric("Treasury", "$\(game.snapshot.treasury)")
+                metric(layout.mode == .singlePortrait ? "Cash" : "Treasury", "$\(game.snapshot.treasury)")
                 metric("Food", "\(game.snapshot.foodInStores)")
                 metric("Happy", "\(game.snapshot.meanHappiness)%")
             }
@@ -474,7 +474,7 @@ private struct CityDisplayLayout {
     var stackedPreviews: Bool { controls.width < 500 }
     var compactTools: Bool { mode != .laptopFold }
     var scrollControls: Bool {
-        mode == .singlePortrait || mode == .singleLandscape || mode == .laptopFold || controls.height - occlusionTopInset < 360
+        (mode == .singlePortrait && controls.height - occlusionTopInset < 450) || mode == .singleLandscape || mode == .laptopFold || controls.height - occlusionTopInset < 360
     }
     var cardWidth: CGFloat { max(0, min(controls.width - 36, 360)) }
     var optionListHeight: CGFloat {
