@@ -7,6 +7,9 @@ import PocketRepublicCore
     @Published private(set) var state: RepublicState
     @Published private(set) var saveIssue: String?
     @Published private(set) var feedback: String?
+    /// Set when the gazette asks to pan the camera. Presentation only.
+    @Published var spotlight: MapSpotlight?
+    private var spotlightToken = 0
 
     /// The old prototype's UserDefaults save is intentionally left untouched.
     let hasPrototypeSave: Bool
@@ -56,6 +59,23 @@ import PocketRepublicCore
         case .rejected(let reason):
             feedback = reason.message
         }
+    }
+
+    func showOnMap(_ location: EventLocation) {
+        let tile: TileIndex?
+        if let direct = location.tile {
+            tile = direct
+        } else if let building = location.building,
+                  building.raw >= 0, Int(building.raw) < state.buildings.count {
+            tile = state.buildings[Int(building.raw)].tile
+        } else if let district = location.district, Int(district.raw) < state.districts.count {
+            tile = state.districts[Int(district.raw)].centroid
+        } else {
+            tile = nil
+        }
+        guard let tile else { return }
+        spotlightToken += 1
+        spotlight = MapSpotlight(x: state.map.x(of: tile), y: state.map.y(of: tile), token: spotlightToken)
     }
 
     func advance() {
@@ -198,6 +218,12 @@ import PocketRepublicCore
     }
 
     private enum SaveError: Error { case invalidState }
+}
+
+struct MapSpotlight: Equatable {
+    var x: Int32
+    var y: Int32
+    var token: Int
 }
 
 private struct SpatialSave: Codable {
