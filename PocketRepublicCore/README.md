@@ -6,14 +6,19 @@ renderer replaceable and lets the whole thing test on Linux CI with no Mac.
 
 ## Running the tests
 
-No Swift toolchain is needed on the host — the Ubuntu Swift builds do not run on
-this Arch box (missing `libncurses.so.6`, `libpython3.9.so.1.0` and friends).
-Use the official image:
+From the repository root with Swift 6.2 installed:
 
 ```bash
-cd /home/jsmith/projects/pocket-republic/core
-docker run --rm -v "$PWD":/pkg -w /pkg swift:6.2 swift test            # 40 tests
-docker run --rm -v "$PWD":/pkg -w /pkg swift:6.2 swift test -c release # for timings
+cd PocketRepublicCore
+swift test # 71 tests
+```
+
+Or, from inside `PocketRepublicCore`, use the official Docker image:
+
+```bash
+docker run --rm -v "$PWD":/pkg -w /pkg swift:6.2 swift test
+# For release timings:
+docker run --rm -v "$PWD":/pkg -w /pkg swift:6.2 swift test -c release
 ```
 
 Debug timings are ~12x slower than release; quote release numbers only.
@@ -102,7 +107,7 @@ rather than asserting taste — run them after a config change to see the effect
 
 ## Known state, honestly
 
-- 40 tests pass, debug and release.
+- 71 tests passed with zero failures in the debug CI run for main `3db7d17` ([run 40218820097](https://github.com/JSCreate-Dev/pocket-republic/actions/runs/40218820097)). Release was not re-tested for this update.
 - Release: **0.518 ms/tick** at 1000 citizens / 453 buildings; distance-field
   rebuild **3.795 ms** over 9216 tiles; save **777 KB** uncompressed JSON.
 - Zero idle days across seeds at 500 and 1000 citizens.
@@ -112,4 +117,7 @@ rather than asserting taste — run them after a config change to see the effect
   needed. Farms dumped every unit on the single nearest market, that market
   paid for food it could not sell and went broke, and ten houses were counted
   one step out of range because distance was measured on the floor tile instead
-  of the door. `HungerTests` locks the settled city at zero hunger.
+  of the door. `HungerTests` now requires zero hungry citizens **within**
+  market service range after day 40 on seeds 2026 and 11. Seed 2026 still has
+  four households whose doors are 21 road tiles from the nearest market,
+  beyond the 20-tile cap; seed 11 has none beyond the cap.
