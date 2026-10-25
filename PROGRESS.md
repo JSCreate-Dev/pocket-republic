@@ -10,7 +10,7 @@ Jordan wants Pocket Republic to feel like a lively, living world with a real gam
 
 ## Current state
 
-Snapshot of main `dd87c6e` (PR #2 squash-merge) plus this docs pass, read against the code on 2026-10-25. This environment has no Swift toolchain and no iPhone, so tests and the device build were not re-run here.
+Snapshot of this branch after merging main `b960f52` (PR #2 `dd87c6e` and PR #3), plus art direction v1 and the app icon, read against the code on 2026-10-25. This environment has no Swift toolchain, no Xcode, and no iPhone, so tests, the asset-catalog compile, and the device build were not re-run here.
 
 ### What works
 
@@ -39,7 +39,7 @@ Jordan's iPhone playtest is recorded below. Which binary that was, and whether C
 ### Known issues
 
 - **Hunger with food surplus.** [PocketRepublicCore/README.md](PocketRepublicCore/README.md) records a 200-day unattended run (the same shape as `EconomyReportTests.testPrintEconomyReport`: seed 2026, 250 citizens, `autoResolve` picking option 0) in which 47 of 250 citizens are hungry (~19%) while production is about 372/day against 250/day needed and about 164/day spoils. The test prints those lines and does not assert them, and this pass did not re-run it. The mechanism in `feedCitizens` matches that diagnosis: a citizen goes hungry when the home tile has no market inside `maxServiceDistance`, the market lacks a full ration, or the citizen cannot pay `foodPrice` (a short payment is refunded). `spoil` then removes `marketSpoilagePercent` of each farm and market store. Supply is in surplus on paper; distribution and affordability leave people hungry.
-- **One-tile buildings, placeholder art.** `WorldMap.buildingAt` stores one building id per tile. Sprites are flat UIColor blocks. `Assets.xcassets` on this branch contains AccentColor only (no app icon, no building images).
+- **One-tile buildings, placeholder building art.** `WorldMap.buildingAt` stores one building id per tile. Sprites are flat UIColor blocks; there are no building images. The app icon is `PocketRepublic/Assets.xcassets/AppIcon.appiconset/AppIcon-1024.png` (1024×1024, 8-bit RGB, no alpha), selected with `ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon` on the app target. Style rules are in [docs/ART_DIRECTION.md](docs/ART_DIRECTION.md).
 - **Placeholder bundle id** `com.example.PocketRepublic` on Debug and Release.
 - **Legacy save left behind.** `pocket.republic.save.v1` is detected and never migrated.
 - **Inspect is a tile caption.** Tapping a placed building does not show workers, residents, food, funds, mode, or actions.
@@ -66,6 +66,10 @@ Placement in that doc: anchor plus footprint, every covered tile buildable and e
 
 Section 3 specifies the decree card (title, flavor, cost or Free, faction chips, plain-language effects, **Issue decree** / **Not now**) and the newspaper-style event feed (group by kind, district, and day; headline templates; a because-line from `CauseFactor`; names; **Show me**).
 
+### Art on this branch
+
+[docs/ART_DIRECTION.md](docs/ART_DIRECTION.md) is v1: a sunny isometric toy-diorama, town hall as the visual anchor, palette, and the app-icon description. The icon file is in the asset catalog. Building sprites are not. Footprint sizes and the 1x sprite base now come from [docs/DESIGN.md](docs/DESIGN.md); the art doc's earlier hold was waiting on that recommendation.
+
 ### Ownership (locked)
 
 This split supersedes the shorter handoff line in the 11:17 AM Game Designer log and the one-line "Next" note inside [docs/DESIGN.md](docs/DESIGN.md). The design rules in that doc stay authoritative. Section 3's follow-ups sit with the same roles: Ios Dev builds the decree and event UI, Game Logic adds `flavor` on `DecreeSpec` and keeps a cause on every negative event.
@@ -74,10 +78,6 @@ This split supersedes the shorter handoff line in the 11:17 AM Game Designer log
 - **Ios Dev** owns the ghost preview, rendering, the inspect panel, and CI, built on Game Logic's core API. Ios Dev also owns the decree-card and event-feed UI from section 3.
 - **Game Designer** owns [docs/DESIGN.md](docs/DESIGN.md).
 - **Visual And Grapchics** owns sprites (sized from the design table) and the app icon.
-
-### Parallel work not on this branch
-
-PR #1 (`cursor/art-direction-and-icon-108e`) adds `docs/ART_DIRECTION.md`, a 1024×1024 app icon, and its own short `PROGRESS.md`. It is not contained here. Merging it will collide with this file.
 
 ## Owner playtest feedback (Oct 25, 2026)
 
@@ -115,14 +115,20 @@ The core PR merges first.
 
 ### Visual And Grapchics
 
-- Building sprites sized from the footprint table in [docs/DESIGN.md](docs/DESIGN.md). The island still draws flat color blocks.
-- App icon. The catalog on this branch has none. PR #1 has a 1024×1024 icon and `docs/ART_DIRECTION.md` in flight.
+- Building sprites sized from the footprint table and sprite-base formula in [docs/DESIGN.md](docs/DESIGN.md), in the style of [docs/ART_DIRECTION.md](docs/ART_DIRECTION.md). The island still draws flat color blocks. Footprint sizes are settled, so this is no longer waiting on the Game Designer recommendation.
+- The app icon is in the catalog (see Known issues). It has not been compiled with `actool`.
 
 ### Later / backlog
 
 - Player-customizable iPhone Duo layouts (choose what each panel shows, for example map, inspect, agenda, or stats). Owner: Ios Dev. Deferred by Jordan until performance and game feel are optimized.
 
 ## Log
+
+### 2026-10-25 11:28 AM EDT — Visual And Grapchics — `cursor/art-direction-and-icon-108e` (PR #1)
+
+- **Changed:** Merged `origin/main` (`b960f52`) with a merge commit. Kept this file from main, refreshed Current state for the art that is now in the tree, and added this entry. `docs/ART_DIRECTION.md` is art direction v1. Added `PocketRepublic/Assets.xcassets/AppIcon.appiconset` (Xcode 14+ single-size 1024×1024 universal iOS icon) and set `ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon` on the app target Debug and Release configurations. The asset catalog was already in the target resources. The short `PROGRESS.md` from this branch is not kept.
+- **Verified:** `AppIcon-1024.png` is 1024×1024, 8-bit RGB (color type 2), with no alpha and no `tRNS` chunk. `Contents.json` parses. No simulation, gameplay, bundle ID, or CI edits. No Xcode or `actool` here, so the catalog was not compiled. No Swift toolchain, so `swift test` was not run.
+- **Next:** Building sprites are Visual And Grapchics' remaining art work, sized from the footprint table in `docs/DESIGN.md` and the style in `docs/ART_DIRECTION.md`. The island still draws flat color blocks. Game Logic's footprint-core PR still merges before Ios Dev builds the ghost, renderer, inspect panel, and CI.
 
 ### 2026-10-25 11:25 AM EDT — Docs agent — `cursor/progress-log-d016` (PR #3)
 
