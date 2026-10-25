@@ -1,4 +1,10 @@
-name: Build unsigned iOS IPA
+name: Build iOS IPA
+
+# Runner: xcode-27 is the GitHub-hosted image that includes Xcode 27.1 and the
+# iOS 27.1 SDK (see actions/runner-images, label xcode-27 / xcode-27-xlarge).
+# macos-latest and macos-26 stop at Xcode 26.x, which cannot compile this
+# project's iOS 27.1 calls. Xcode 27.1 is installed at the path pinned below
+# and is the default Xcode on the xcode-27-arm64 image (build 27A9275).
 
 on:
   push:
@@ -10,11 +16,26 @@ permissions:
 jobs:
   build:
     runs-on: xcode-27
-    timeout-minutes: 30
+    timeout-minutes: 45
     env:
       DEVELOPER_DIR: /Applications/Xcode_27.1.app/Contents/Developer
     steps:
       - uses: actions/checkout@v4
+
+      - name: Select Xcode 27.1
+        run: |
+          set -euo pipefail
+          xcode_app=/Applications/Xcode_27.1.app
+          if [[ ! -d "$xcode_app/Contents/Developer" ]]; then
+            echo "Xcode 27.1 is not installed on this runner image."
+            echo "Pocket Republic needs the iOS 27.1 SDK. The hosted label that provides it is xcode-27."
+            ls /Applications | grep -i xcode || true
+            exit 1
+          fi
+          sudo xcode-select -s "$xcode_app"
+          version=$(xcodebuild -version)
+          printf '%s\n' "$version"
+          printf '%s\n' "$version" | grep -q '^Xcode 27.1$'
 
       - name: Test deterministic core
         run: swift test --package-path PocketRepublicCore
@@ -22,7 +43,6 @@ jobs:
       - name: Build iOS device app without signing
         run: |
           set -euo pipefail
-          xcodebuild -version
           xcodebuild \
             -project PocketRepublic.xcodeproj \
             -scheme PocketRepublic \
@@ -38,6 +58,15 @@ jobs:
           set -euo pipefail
           app="$RUNNER_TEMP/PocketRepublicDerivedData/Build/Products/Release-iphoneos/PocketRepublic.app"
           test -d "$app"
+          expected=com.jscreate.pocketrepublic
+          configured=$(sed -n 's/^PRODUCT_BUNDLE_IDENTIFIER[[:space:]]*=[[:space:]]*//p' Config/PocketRepublic.xcconfig)
+          configured=$(printf '%s' "$configured" | tr -d '[:space:]')
+          built=$(plutil -extract CFBundleIdentifier raw -o - "$app/Info.plist")
+          executable=$(plutil -extract CFBundleExecutable raw -o - "$app/Info.plist")
+          test "$configured" = "$expected"
+          test "$built" = "$expected"
+          test -x "$app/$executable"
+          file "$app/$executable" | grep -q 'Mach-O'
           mkdir -p "$RUNNER_TEMP/PocketRepublicPackage/Payload"
           ditto "$app" "$RUNNER_TEMP/PocketRepublicPackage/Payload/PocketRepublic.app"
           (
@@ -46,7 +75,10 @@ jobs:
           )
           unzip -tq "$GITHUB_WORKSPACE/PocketRepublic-unsigned.ipa"
           unzip -Z -1 "$GITHUB_WORKSPACE/PocketRepublic-unsigned.ipa" | grep '^Payload/PocketRepublic.app/Info.plist$'
-          shasum -a 256 "$GITHUB_WORKSPACE/PocketRepublic-unsigned.ipa" > "$GITHUB_WORKSPACE/PocketRepublic-unsigned.ipa.sha256"
+          (
+            cd "$GITHUB_WORKSPACE"
+            shasum -a 256 PocketRepublic-unsigned.ipa > PocketRepublic-unsigned.ipa.sha256
+          )
 
       - name: Upload unsigned IPA
         uses: actions/upload-artifact@v4
@@ -55,4 +87,27 @@ jobs:
           path: |
             PocketRepublic-unsigned.ipa
             PocketRepublic-unsigned.ipa.sha256
+          if-no-files-found: error
+
+      - name: Export signed IPA when Apple secrets are present
+        id: sign
+        env:
+          APPLE_CERTIFICATE_P12_BASE64: ${{ secrets.APPLE_CERTIFICATE_P12_BASE64 }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_PROVISIONING_PROFILE_BASE64: ${{ secrets.APPLE_PROVISIONING_PROFILE_BASE64 }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APP_STORE_CONNECT_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+          APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+          APP_STORE_CONNECT_API_KEY_BASE64: ${{ secrets.APP_STORE_CONNECT_API_KEY_BASE64 }}
+          APPLE_EXPORT_METHOD: ${{ vars.APPLE_EXPORT_METHOD }}
+        run: bash .github/scripts/export-signed-ipa.sh
+
+      - name: Upload signed IPA
+        if: steps.sign.outputs.enabled == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: PocketRepublic-signed-ipa
+          path: |
+            PocketRepublic-signed.ipa
+            PocketRepublic-signed.ipa.sha256
           if-no-files-found: error
