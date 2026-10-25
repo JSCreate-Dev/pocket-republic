@@ -355,11 +355,12 @@ private struct CityDisplayLayout {
         }
         // Standard containers handle safe areas. This extra check protects our
         // manually positioned panel from an active camera occlusion inside them.
+        let panel = controls
         if #available(iOS 27.1, *) {
             occlusionTopInset = geometry.reservedRegions(kind: .occlusion)
                 .map(\.frame)
-                .filter { $0.intersects(controls) && $0.minY <= controls.minY + 80 }
-                .map { max(0, $0.maxY - controls.minY) }
+                .filter { $0.intersects(panel) && $0.minY <= panel.minY + 80 }
+                .map { max(0, $0.maxY - panel.minY) }
                 .max() ?? 0
         } else {
             occlusionTopInset = 0
