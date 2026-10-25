@@ -107,7 +107,9 @@ rather than asserting taste — run them after a config change to see the effect
   rebuild **3.795 ms** over 9216 tiles; save **777 KB** uncompressed JSON.
 - Zero idle days across seeds at 500 and 1000 citizens.
 - Crisis days: 14–34 per 300, depending on seed.
-- **Open balance item:** ~19% of citizens are still hungry in a 200-day
-  unattended run (47 of 250) while food *supply* is in surplus (372/day produced
-  vs 250 needed) and 164/day spoils. This is affordability and market stock
-  distribution, not production. It is the top item for the balance pass.
+- **Hunger with a surplus is fixed.** The old 200-day run (seed 2026, 250
+  citizens) left ~47 people hungry while farms produced ~372/day against 250
+  needed. Farms dumped every unit on the single nearest market, that market
+  paid for food it could not sell and went broke, and ten houses were counted
+  one step out of range because distance was measured on the floor tile instead
+  of the door. `HungerTests` locks the settled city at zero hunger.
