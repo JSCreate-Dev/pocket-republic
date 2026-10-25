@@ -8,7 +8,7 @@ The island now renders distinct display configurations. A single outer display k
 
 ## Verified
 
-`git diff --check` passed. The iOS build and on-device posture behavior are pending CI and a Duo playtest. The Local VM has no Swift/Xcode toolchain or iPhone simulator.
+`git diff --check` passed. [Build iOS IPA run 40244633312](https://github.com/JSCreate-Dev/pocket-republic/actions/runs/40244633312) passed the core suite, unsigned iOS device build, and IPA upload. On-device posture behavior is pending a Duo playtest. The Local VM has no Swift/Xcode toolchain or iPhone simulator.
 
 ## Next
 
