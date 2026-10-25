@@ -224,7 +224,7 @@ final class IslandScene: SKScene {
         refreshSelection()
     }
 
-    /// Highlights every tile `buildingAt` assigns to the building, not only its origin.
+    /// Highlights every tile `BuildingOccupancy` assigns to the building, not only its origin.
     func setSelection(_ id: BuildingID?) {
         let pulse = id != nil && id != selectedBuildingID
         selectedBuildingID = id

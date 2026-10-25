@@ -87,7 +87,9 @@ extension SimulationEngine {
             guard Int(id.raw) >= 0, Int(id.raw) < s.buildings.count else {
                 return .rejected(.noSuchBuilding)
             }
-            guard s.map.buildingAt.contains(id.raw) else { return .rejected(.noSuchBuilding) }
+            guard !BuildingOccupancy.tiles(of: id, on: s.map).isEmpty else {
+                return .rejected(.noSuchBuilding)
+            }
             guard s.buildings[Int(id.raw)].kind.offersCommission else {
                 return .rejected(.operatingModeNotOffered)
             }

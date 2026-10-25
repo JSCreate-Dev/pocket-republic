@@ -20,8 +20,8 @@ final class BuildingInspectionTests: XCTestCase {
         let origin = state.map.index(x: 1, y: 1)
         let covered = state.map.index(x: 2, y: 2)
         let id = place(.clinic, at: origin, in: &state)
-        state.map.buildingAt[Int(origin.raw)] = -1
-        state.map.buildingAt[Int(covered.raw)] = id.raw
+        clearOccupancy([origin], in: &state)
+        occupy(id, tiles: [covered], in: &state)
 
         let hit = BuildingHitTest.building(at: CityProjection.worldPoint(x: 2, y: 2), in: state)
         XCTAssertEqual(hit?.id, id)
@@ -194,7 +194,7 @@ final class BuildingInspectionTests: XCTestCase {
         var state = makeState()
         let tile = state.map.index(x: 1, y: 1)
         let id = place(.house, at: tile, in: &state)
-        state.map.buildingAt[Int(tile.raw)] = -1
+        clearOccupancy([tile], in: &state)
         XCTAssertNil(BuildingHitTest.building(on: tile, in: state))
         XCTAssertNil(BuildingInspector.make(id: id, in: state))
     }
@@ -229,7 +229,7 @@ final class BuildingInspectionTests: XCTestCase {
 
         XCTAssertEqual(SimulationEngine.apply(.setOperatingMode(BuildingID(40), .balanced), to: &state),
                        .rejected(.noSuchBuilding))
-        state.map.buildingAt[Int(state.buildings[Int(farm.raw)].tile.raw)] = -1
+        clearOccupancy([state.buildings[Int(farm.raw)].tile], in: &state)
         XCTAssertEqual(SimulationEngine.apply(.setOperatingMode(farm, .intensive), to: &state),
                        .rejected(.noSuchBuilding))
     }
@@ -248,11 +248,22 @@ final class BuildingInspectionTests: XCTestCase {
         let id = BuildingID(Int32(state.buildings.count))
         state.buildings.append(Building(id: id, kind: kind, tile: tile,
                                         district: DistrictID(0), builtOnDay: day))
-        state.map.buildingAt[Int(tile.raw)] = id.raw
-        for other in extra where Int(other.raw) >= 0 && Int(other.raw) < state.map.tileCount {
-            state.map.buildingAt[Int(other.raw)] = id.raw
-        }
+        occupy(id, tiles: [tile] + extra, in: &state)
         return id
+    }
+
+    /// Writes today's `buildingAt` array. When Game Logic's footprint `buildingAt`
+    /// replaces that array, change this helper rather than each test.
+    private func occupy(_ id: BuildingID, tiles: [TileIndex], in state: inout RepublicState) {
+        for tile in tiles where Int(tile.raw) >= 0 && Int(tile.raw) < state.map.tileCount {
+            state.map.buildingAt[Int(tile.raw)] = id.raw
+        }
+    }
+
+    private func clearOccupancy(_ tiles: [TileIndex], in state: inout RepublicState) {
+        for tile in tiles where Int(tile.raw) >= 0 && Int(tile.raw) < state.map.tileCount {
+            state.map.buildingAt[Int(tile.raw)] = -1
+        }
     }
 
     private func pave(_ x: Int32, _ y: Int32, in state: inout RepublicState) {

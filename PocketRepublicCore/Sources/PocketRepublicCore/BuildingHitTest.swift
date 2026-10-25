@@ -24,9 +24,31 @@ public struct CityPoint: Equatable, Sendable {
     }
 }
 
+/// The only reads of today's per-tile occupancy array.
+///
+/// Game Logic's footprint PR will define `buildingAt` for this same question.
+/// Retarget `occupant(at:on:)` and `tiles(of:on:)` and leave the inspect panel alone.
+public enum BuildingOccupancy {
+    public static func occupant(at tile: TileIndex, on map: WorldMap) -> BuildingID? {
+        guard tile.raw >= 0, Int(tile.raw) < map.tileCount else { return nil }
+        let raw = map.buildingAt[Int(tile.raw)]
+        return raw < 0 ? nil : BuildingID(raw)
+    }
+
+    public static func tiles(of id: BuildingID, on map: WorldMap) -> [TileIndex] {
+        var tiles: [TileIndex] = []
+        tiles.reserveCapacity(4)
+        for raw in 0..<map.tileCount {
+            let tile = TileIndex(Int32(raw))
+            if occupant(at: tile, on: map) == id { tiles.append(tile) }
+        }
+        return tiles
+    }
+}
+
 /// Tap picking for placed buildings.
 ///
-/// `WorldMap.buildingAt` is the authority, not `Building.tile`. A footprint can
+/// Occupancy comes from `BuildingOccupancy`, not `Building.tile`. A footprint can
 /// cover tiles other than its origin; the building that occupies the tapped tile
 /// is the one that gets inspected. Footprint sizes themselves stay with Game Logic.
 public enum BuildingHitTest {
@@ -46,23 +68,16 @@ public enum BuildingHitTest {
 
     /// The building occupying `tile`, even when `tile` is not that building's origin.
     public static func building(on tile: TileIndex, in state: RepublicState) -> Building? {
-        let map = state.map
-        guard tile.raw >= 0, Int(tile.raw) < map.tileCount else { return nil }
-        guard let id = map.building(at: tile) else { return nil }
+        guard let id = BuildingOccupancy.occupant(at: tile, on: state.map) else { return nil }
         guard id.raw >= 0, Int(id.raw) < state.buildings.count else { return nil }
         let building = state.buildings[Int(id.raw)]
         guard building.id == id else { return nil }
         return building
     }
 
-    /// Every tile whose occupancy entry is `id`, origin or not.
+    /// Every tile `BuildingOccupancy` assigns to `id`, origin or not.
     public static func occupiedTiles(_ id: BuildingID, on map: WorldMap) -> [TileIndex] {
-        var tiles: [TileIndex] = []
-        tiles.reserveCapacity(4)
-        for (offset, raw) in map.buildingAt.enumerated() where raw == id.raw {
-            tiles.append(TileIndex(Int32(offset)))
-        }
-        return tiles
+        BuildingOccupancy.tiles(of: id, on: map)
     }
 
     /// True when any occupied tile has a road on a 4-neighbour, matching placement's

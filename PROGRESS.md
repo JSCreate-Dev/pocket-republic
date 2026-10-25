@@ -1,6 +1,6 @@
 # PROGRESS.md
 
-Living handoff for Pocket Republic. Overwrite **Current state** on every change. Add a **Log** entry at the top of the log (newest first). The **North star** is the bar every pull request is judged against.
+Living handoff for Pocket Republic. Overwrite **Current state** on every change. New pull requests record their log in `docs/log/YYYY-MM-DD-<short-branch>.md` instead of adding to the **Log** below (see AGENTS.md). Entries already in that log stay, newest first. The **North star** is the bar every pull request is judged against.
 
 ## North star
 
@@ -10,7 +10,7 @@ Jordan wants Pocket Republic to feel like a lively, living world with a real gam
 
 ## Current state
 
-Snapshot of `cursor/building-inspect-panel-ef49` on top of main `b960f52`, read against the code on 2026-10-25. `swift test` in `PocketRepublicCore` passed 51 tests on Swift 6.2 (Linux, debug). This environment has no iOS SDK, so the island UI was not run on a simulator or a phone.
+Snapshot of `cursor/building-inspect-panel-ef49` (PR #7) after merging main `3b88a5c` (PR #1, art direction v1 and the app icon, on top of `b960f52`). `swift test` in `PocketRepublicCore` passed 51 tests on Swift 6.2 (Linux, debug). This environment has no iOS SDK, so the inspect panel and the asset catalog were not run on a simulator or a phone. New work logs go in `docs/log/`; the entries below stay.
 
 ### What works
 
@@ -39,7 +39,7 @@ Jordan's iPhone playtest is recorded below. Which binary that was, and whether C
 ### Known issues
 
 - **Hunger with food surplus.** [PocketRepublicCore/README.md](PocketRepublicCore/README.md) records a 200-day unattended run (the same shape as `EconomyReportTests.testPrintEconomyReport`: seed 2026, 250 citizens, `autoResolve` picking option 0) in which 47 of 250 citizens are hungry (~19%) while production is about 372/day against 250/day needed and about 164/day spoils. The test prints those lines and does not assert them, and this pass did not re-run it. The mechanism in `feedCitizens` matches that diagnosis: a citizen goes hungry when the home tile has no market inside `maxServiceDistance`, the market lacks a full ration, or the citizen cannot pay `foodPrice` (a short payment is refunded). `spoil` then removes `marketSpoilagePercent` of each farm and market store. Supply is in surplus on paper; distribution and affordability leave people hungry.
-- **One-tile buildings, placeholder art.** `WorldMap.buildingAt` stores one building id per tile. Sprites are flat UIColor blocks. `Assets.xcassets` on this branch contains AccentColor only (no app icon, no building images).
+- **One-tile buildings, placeholder building art.** `WorldMap.buildingAt` stores one building id per tile. Sprites are flat UIColor blocks; there are no building images. The app icon is `PocketRepublic/Assets.xcassets/AppIcon.appiconset/AppIcon-1024.png` (1024×1024, 8-bit RGB, no alpha), selected with `ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon` on the app target. Style rules are in [docs/ART_DIRECTION.md](docs/ART_DIRECTION.md).
 - **Placeholder bundle id** `com.example.PocketRepublic` on Debug and Release.
 - **Legacy save left behind.** `pocket.republic.save.v1` is detected and never migrated.
 - **Inspect host is still the controls rail.** The panel view does not present a sheet. The design's unfolded side-by-side pane and folded bottom sheet are not built, and a tap does not wiggle the sprite or follow a resident.
@@ -66,6 +66,10 @@ Placement in that doc: anchor plus footprint, every covered tile buildable and e
 
 Section 3 specifies the decree card (title, flavor, cost or Free, faction chips, plain-language effects, **Issue decree** / **Not now**) and the newspaper-style event feed (group by kind, district, and day; headline templates; a because-line from `CauseFactor`; names; **Show me**).
 
+### Art on this branch
+
+[docs/ART_DIRECTION.md](docs/ART_DIRECTION.md) is v1: a sunny isometric toy-diorama, town hall as the visual anchor, palette, and the app-icon description. The icon file is in the asset catalog. Building sprites are not. Footprint sizes and the 1x sprite base now come from [docs/DESIGN.md](docs/DESIGN.md); the art doc's earlier hold was waiting on that recommendation.
+
 ### Ownership (locked)
 
 This split supersedes the shorter handoff line in the 11:17 AM Game Designer log and the one-line "Next" note inside [docs/DESIGN.md](docs/DESIGN.md). The design rules in that doc stay authoritative. Section 3's follow-ups sit with the same roles: Ios Dev builds the decree and event UI, Game Logic adds `flavor` on `DecreeSpec` and keeps a cause on every negative event.
@@ -74,10 +78,6 @@ This split supersedes the shorter handoff line in the 11:17 AM Game Designer log
 - **Ios Dev** owns the ghost preview, rendering, the inspect panel, and CI, built on Game Logic's core API. Ios Dev also owns the decree-card and event-feed UI from section 3.
 - **Game Designer** owns [docs/DESIGN.md](docs/DESIGN.md).
 - **Visual And Grapchics** owns sprites (sized from the design table) and the app icon.
-
-### Parallel work not on this branch
-
-PR #1 (`cursor/art-direction-and-icon-108e`) adds `docs/ART_DIRECTION.md`, a 1024×1024 app icon, and its own short `PROGRESS.md`. It is not contained here. Merging it will collide with this file.
 
 ## Owner playtest feedback (Oct 25, 2026)
 
@@ -115,8 +115,8 @@ The core PR merges first.
 
 ### Visual And Grapchics
 
-- Building sprites sized from the footprint table in [docs/DESIGN.md](docs/DESIGN.md). The island still draws flat color blocks.
-- App icon. The catalog on this branch has none. PR #1 has a 1024×1024 icon and `docs/ART_DIRECTION.md` in flight.
+- Building sprites sized from the footprint table and sprite-base formula in [docs/DESIGN.md](docs/DESIGN.md), in the style of [docs/ART_DIRECTION.md](docs/ART_DIRECTION.md). The island still draws flat color blocks. Footprint sizes are settled, so this is no longer waiting on the Game Designer recommendation.
+- The app icon is in the catalog (see Known issues). It has not been compiled with `actool`.
 
 ### Later / backlog
 
@@ -126,9 +126,15 @@ The core PR merges first.
 
 ### 2026-10-25 11:33 AM EDT — Ios Dev — `cursor/building-inspect-panel-ef49` (PR #7)
 
-- **Changed:** Tap-to-inspect. `BuildingInspectPanel` is a self-contained view in the island controls column (not a bottom sheet). Selection highlights every tile `buildingAt` assigns to the building. The model is `BuildingInspection`, ordered status, then staffing, then numbers, from fields the core already tracks. The only core command added is `PlayerIntent.setOperatingMode`, because nothing else could change `OperatingMode` after the placement commission. Footprints, hunger, and walker routing were not touched.
+- **Changed:** Tap-to-inspect. `BuildingInspectPanel` is a self-contained view in the island controls column (not a bottom sheet). Selection highlights every tile the occupancy map assigns to the building. The model is `BuildingInspection`, ordered status, then staffing, then numbers, from fields the core already tracks. The only core command added is `PlayerIntent.setOperatingMode`, because nothing else could change `OperatingMode` after the placement commission. Footprints, hunger, and walker routing were not touched.
 - **Verified:** `swift test` in `PocketRepublicCore` on Swift 6.2 (Linux, debug): 51 tests, 0 failures. No iOS SDK here, so the panel, highlight, and haptic were not run on a simulator or a phone. No screenshot.
-- **Next:** Game Logic's footprint core still comes before ghost preview and footprint rendering. This panel already selects by occupancy, so multi-tile `buildingAt` entries should light up without a second picker. A later layout PR can host `BuildingInspectPanel` in the unfolded side pane and the folded bottom sheet.
+- **Next:** Game Logic's footprint core still comes before ghost preview and footprint rendering. Occupancy reads go through `BuildingOccupancy`, so their `buildingAt` can replace the array in that one type. A later layout PR can host `BuildingInspectPanel` in the unfolded side pane and the folded bottom sheet.
+
+### 2026-10-25 11:28 AM EDT — Visual And Grapchics — `cursor/art-direction-and-icon-108e` (PR #1)
+
+- **Changed:** Merged `origin/main` (`b960f52`) with a merge commit. Kept this file from main, refreshed Current state for the art that is now in the tree, and added this entry. `docs/ART_DIRECTION.md` is art direction v1. Added `PocketRepublic/Assets.xcassets/AppIcon.appiconset` (Xcode 14+ single-size 1024×1024 universal iOS icon) and set `ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon` on the app target Debug and Release configurations. The asset catalog was already in the target resources. The short `PROGRESS.md` from this branch is not kept.
+- **Verified:** `AppIcon-1024.png` is 1024×1024, 8-bit RGB (color type 2), with no alpha and no `tRNS` chunk. `Contents.json` parses. No simulation, gameplay, bundle ID, or CI edits. No Xcode or `actool` here, so the catalog was not compiled. No Swift toolchain, so `swift test` was not run.
+- **Next:** Building sprites are Visual And Grapchics' remaining art work, sized from the footprint table in `docs/DESIGN.md` and the style in `docs/ART_DIRECTION.md`. The island still draws flat color blocks. Game Logic's footprint-core PR still merges before Ios Dev builds the ghost, renderer, inspect panel, and CI.
 
 ### 2026-10-25 11:25 AM EDT — Docs agent — `cursor/progress-log-d016` (PR #3)
 
