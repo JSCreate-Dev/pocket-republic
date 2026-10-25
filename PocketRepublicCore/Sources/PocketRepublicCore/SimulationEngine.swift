@@ -14,6 +14,10 @@ public enum SimulationEngine {
         let firstNewEvent = s.events.count
 
         s.day += 1
+        // Before the cache rebuild on purpose: a market that finishes today has to
+        // be a service source *today*, which means the fields it dirties must be
+        // rebuilt in this same tick (docs/DESIGN.md section 7.10).
+        advanceConstruction(&s)
         if s.fields.dirty { rebuildSpatialCaches(&s) }
 
         assignWork(&s)
@@ -32,6 +36,29 @@ public enum SimulationEngine {
         AgendaGenerator.update(&s)
 
         return Array(s.events[firstNewEvent...])
+    }
+
+    // MARK: - Construction
+
+    /// Put one day of work into every unfinished site. A site that reaches its day
+    /// count opens here: it emits `.buildingConstructed` and dirties the spatial
+    /// fields so the rest of this very tick sees it as a real building.
+    static func advanceConstruction(_ s: inout RepublicState) {
+        var anyCompleted = false
+        for i in s.buildings.indices where s.buildings[i].isUnderConstruction {
+            // Demolishing a site leaves the record in `buildings` and only clears the
+            // map, so check the ground before building on it. Without this, a
+            // cancelled site would keep ticking and later announce that it opened.
+            guard s.map.buildingAt(s.buildings[i].entrance) == s.buildings[i].id else { continue }
+            s.buildings[i].daysConstructed += 1
+            guard !s.buildings[i].isUnderConstruction else { continue }
+            anyCompleted = true
+            let b = s.buildings[i]
+            s.emit(.buildingConstructed,
+                   location: EventLocation(district: b.district, building: b.id, tile: b.entrance),
+                   magnitude: Int32(b.kind.buildCost))
+        }
+        if anyCompleted { s.fields.markDirty() }
     }
 
     // MARK: - Spatial caches (structural change only, never per tick)
@@ -56,7 +83,7 @@ public enum SimulationEngine {
 
     static func assignWork(_ s: inout RepublicState) {
         var openings: [(BuildingID, TileIndex, Int32)] = []
-        for b in s.buildings where b.kind.workerCapacity > Int32(b.workers.count) {
+        for b in s.buildings where b.isOperational && b.kind.workerCapacity > Int32(b.workers.count) {
             openings.append((b.id, b.tile, b.kind.workerCapacity - Int32(b.workers.count)))
         }
         guard !openings.isEmpty else { return }
@@ -93,7 +120,7 @@ public enum SimulationEngine {
         for i in s.buildings.indices {
             let b = s.buildings[i]
             let workers = Int32(b.workers.count)
-            guard workers > 0 else { continue }
+            guard b.isOperational, workers > 0 else { continue }
             let scale = Int64(b.mode.outputPercent)
             switch b.kind {
             case .farm:
@@ -174,7 +201,7 @@ public enum SimulationEngine {
     /// a full barn for no pay. One unit per farm per round keeps the wage money
     /// moving to every farm that actually delivered.
     static func distributeFood(_ s: inout RepublicState) {
-        let marketIndices = s.buildings.indices.filter { s.buildings[$0].kind == .market }
+        let marketIndices = s.buildings.indices.filter { s.buildings[$0].kind == .market && s.buildings[$0].isOperational }
         guard !marketIndices.isEmpty else { return }
         let need = s.config.foodPerCitizenPerDay
         let unitCost = max(Int64(1), s.config.foodPrice / 2)
@@ -219,7 +246,7 @@ public enum SimulationEngine {
             var remaining: Int32
         }
         var lots: [Lot] = []
-        for i in s.buildings.indices where s.buildings[i].kind == .farm {
+        for i in s.buildings.indices where s.buildings[i].kind == .farm && s.buildings[i].isOperational {
             let remaining = min(s.buildings[i].foodStore, s.config.farmToMarketShipPerDay)
             guard remaining > 0 else { continue }
             lots.append(Lot(id: s.buildings[i].id, tile: s.buildings[i].tile, remaining: remaining))
@@ -320,7 +347,7 @@ public enum SimulationEngine {
     static func payWages(_ s: inout RepublicState) {
         for i in s.buildings.indices {
             let b = s.buildings[i]
-            guard !b.workers.isEmpty else { continue }
+            guard b.isOperational, !b.workers.isEmpty else { continue }
             let payer: Account = b.kind.isCivic ? .treasury : .building(b.id)
             let wage = b.kind.isCivic ? s.policy.civicWage : s.config.privateWage
             for cid in b.workers {
@@ -365,7 +392,7 @@ public enum SimulationEngine {
             if due > 0 { s.transfer(from: .citizen(s.citizens[i].id), to: .treasury, due) }
         }
         let brate = Int64(max(0, s.policy.businessTaxPercent))
-        for i in s.buildings.indices where !s.buildings[i].kind.isCivic {
+        for i in s.buildings.indices where !s.buildings[i].kind.isCivic && s.buildings[i].isOperational {
             let due = s.buildings[i].funds * brate / 100
             if due > 0 { s.transfer(from: .building(s.buildings[i].id), to: .treasury, due) }
         }
@@ -373,7 +400,7 @@ public enum SimulationEngine {
 
     static func payUpkeep(_ s: inout RepublicState) {
         var total: Int64 = 0
-        for b in s.buildings where b.kind != .house {
+        for b in s.buildings where b.kind != .house && b.isOperational {
             total += b.kind.isCivic ? s.config.upkeepCivic : s.config.upkeepPrivate
         }
         let paid = s.transfer(from: .treasury, to: .external, total)
@@ -386,7 +413,7 @@ public enum SimulationEngine {
     }
 
     static func spoil(_ s: inout RepublicState) {
-        for i in s.buildings.indices where s.buildings[i].kind.storesFood {
+        for i in s.buildings.indices where s.buildings[i].kind.storesFood && s.buildings[i].isOperational {
             let lost = s.buildings[i].foodStore * s.config.marketSpoilagePercent / 100
             if lost > 0 { s.spoilFood(at: s.buildings[i].id, lost) }
         }

@@ -2,6 +2,8 @@ import Foundation
 
 public enum EventKind: String, Codable, Sendable {
     case dayAdvanced
+    /// Ground is broken on a site. `buildingConstructed` now means it opened.
+    case buildingSiteStarted
     case buildingConstructed
     case buildingAbandoned
     case citizenHungry

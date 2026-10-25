@@ -73,10 +73,21 @@ extension RepublicState {
 
         if e.foodImport > 0 {
             // Food entering the world must be recorded, or conservation breaks.
-            let target = location.building
-                ?? buildings.first(where: { $0.kind == .market && $0.district == location.district })?.id
-                ?? buildings.first(where: { $0.kind == .market })?.id
-            if let t = target, buildings[Int(t.raw)].kind.storesFood {
+            // A market that is still a building site cannot hold food, so walk past
+            // it to one that is open rather than dropping the delivery.
+            var target: BuildingID?
+            let candidates = [
+                location.building,
+                buildings.first(where: {
+                    $0.kind == .market && $0.district == location.district && $0.isOperational })?.id,
+                buildings.first(where: { $0.kind == .market && $0.isOperational })?.id,
+            ]
+            for candidate in candidates {
+                guard let c = candidate else { continue }
+                let b = buildings[Int(c.raw)]
+                if b.kind.storesFood && b.isOperational { target = c; break }
+            }
+            if let t = target {
                 buildings[Int(t.raw)].foodStore += e.foodImport
                 ledger.foodImported += Int64(e.foodImport)
             }

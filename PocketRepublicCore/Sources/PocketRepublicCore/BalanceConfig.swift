@@ -90,5 +90,36 @@ public struct BalanceConfig: Codable, Sendable, Equatable {
     /// will make a demand about it.
     public var factionConcernPercent: Int32 = 20
 
+    // Construction stages (docs/DESIGN.md section 7.3/7.4). Days of work a site
+    // needs before it opens, indexed by `BuildingKind.rawValue`. Dense array, not a
+    // dictionary, so the save stays a flat list of integers.
+    //        townHall, house, farm, market, clinic, school, police, workshop, dock
+    public var constructionDaysByKind: [Int32] = [0, 2, 3, 3, 4, 4, 3, 3, 4]
+    /// Scales every build time. `0` makes everything open the day it is placed,
+    /// which reproduces the pre-construction-stage behaviour exactly.
+    public var constructionDaysMultiplierPercent: Int32 = 100
+    /// Share of the build spent on the foundation before the scaffold goes up.
+    /// At the default 33: 2 days -> 1+1, 3 -> 1+2, 4 -> 2+2.
+    public var constructionFoundationPercent: Int32 = 33
+
+    /// Days of work a freshly placed `kind` needs. `0` means it opens immediately.
+    public func constructionDays(for kind: BuildingKind) -> Int32 {
+        let index = Int(kind.rawValue)
+        guard index >= 0, index < constructionDaysByKind.count else { return 0 }
+        let base = max(0, constructionDaysByKind[index])
+        let percent = max(0, constructionDaysMultiplierPercent)
+        guard base > 0, percent > 0 else { return 0 }
+        return max(1, base * percent / 100)
+    }
+
+    /// How many of `required` days are foundation. Always leaves at least one
+    /// scaffold day once a build takes more than a single day.
+    public func foundationDays(forRequired required: Int32) -> Int32 {
+        guard required > 1 else { return max(0, required) }
+        let percent = min(100, max(0, constructionFoundationPercent))
+        let share = (required * percent + 99) / 100
+        return max(1, min(required - 1, share))
+    }
+
     public init() {}
 }

@@ -162,7 +162,7 @@ public enum WorldGenerator {
     }
 
     static func freeHouse(_ s: inout RepublicState) -> BuildingID? {
-        for b in s.buildings where b.kind == .house
+        for b in s.buildings where b.kind == .house && b.isOperational
             && Int32(b.residents.count) < b.kind.housingCapacity {
             return b.id
         }
@@ -205,12 +205,16 @@ public enum WorldGenerator {
         return construct(&s, kind, anchor: anchor, entrance: entrance)
     }
 
+    /// `daysRequired` defaults to 0, so everything worldgen lays down on day 0 is
+    /// finished and usable. Player placement passes the configured build time.
     static func construct(_ s: inout RepublicState, _ kind: BuildingKind,
-                          anchor: TileIndex, entrance: TileIndex) -> BuildingID {
+                          anchor: TileIndex, entrance: TileIndex,
+                          daysRequired: Int32 = 0) -> BuildingID {
         let id = BuildingID(s.nextBuildingRaw)
         s.nextBuildingRaw += 1
         let building = Building(id: id, kind: kind, anchor: anchor, entrance: entrance,
-                                district: s.map.district(at: entrance), builtOnDay: s.day)
+                                district: s.map.district(at: entrance), builtOnDay: s.day,
+                                daysRequired: daysRequired)
         s.buildings.append(building)
         for tile in building.tilesCovered(on: s.map) {
             s.map.buildingAt[Int(tile.raw)] = id.raw
