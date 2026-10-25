@@ -14,18 +14,8 @@ struct MainView: View {
             events.tabItem { Label("Events", systemImage: "newspaper.fill") }.tag(3)
         }
         .tint(.mint)
-        .alert("A crisis needs your decision", isPresented: Binding(
-            get: { game.state.pending != nil }, set: { _ in }
-        )) {
-            if let pending = game.state.pending {
-                ForEach(pending.options) { option in
-                    Button(option.label) {
-                        game.send(.resolveDecision(pending.id, option: option.id))
-                    }
-                }
-            }
-        } message: {
-            Text("The city will pause until this is resolved.")
+        .onChange(of: game.state.pending?.id) { _, pendingID in
+            if pendingID != nil { tab = 0 }
         }
         .confirmationDialog("Start a new city?", isPresented: $confirmNewCity) {
             Button("Start New City", role: .destructive) { game.startNewCity() }
@@ -36,15 +26,18 @@ struct MainView: View {
 
     private var island: some View {
         NavigationStack {
-            GeometryReader { _ in
-                VStack(alignment: .leading, spacing: 8) {
+            GeometryReader { geometry in
+                let compact = geometry.size.width < 580
+                VStack(alignment: .leading, spacing: compact ? 5 : 8) {
                     Text("Day \(game.snapshot.day) · \(game.snapshot.population) residents")
                         .font(.subheadline).foregroundStyle(.secondary)
                     IslandView()
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                         .clipShape(RoundedRectangle(cornerRadius: 16))
-                    Text("Drag to pan · pinch to zoom · choose a tool, then tap a tile")
-                        .font(.caption).foregroundStyle(.secondary)
+                    if !compact {
+                        Text("Drag to pan · pinch to zoom · choose a tool, then tap a tile")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
                     if let feedback = game.feedback {
                         Text(feedback).font(.callout).foregroundStyle(.orange)
                     }
@@ -63,7 +56,7 @@ struct MainView: View {
                     .buttonStyle(.borderedProminent)
                     .disabled(game.state.blocksAdvance || game.saveIssue != nil)
                 }
-                .padding(10)
+                .padding(compact ? 6 : 10)
             }
             .navigationTitle("Pocket Republic")
         }

@@ -21,6 +21,7 @@ final class IslandScene: SKScene {
     private var routeCache: [RouteKey: [TileIndex]] = [:]
     private var visibleRect: TileRect?
     private var cameraInitialized = false
+    private var cameraUserAdjusted = false
     private var touchStart: CGPoint?
     private var wasDragged = false
 
@@ -55,6 +56,7 @@ final class IslandScene: SKScene {
     override func didChangeSize(_ oldSize: CGSize) {
         super.didChangeSize(oldSize)
         resizeNightLayer()
+        if cameraInitialized && !cameraUserAdjusted { applyDefaultZoom() }
         refreshVisible(force: true)
     }
 
@@ -67,10 +69,18 @@ final class IslandScene: SKScene {
         if !cameraInitialized {
             let middle = state.map.width / 2
             cameraNode.position = point(x: middle, y: middle)
-            cameraNode.setScale(1.1)
+            applyDefaultZoom()
             cameraInitialized = true
         }
         refreshVisible(force: true)
+    }
+
+    /// About nine tile widths on the outer display and fourteen on the inner one.
+    /// `size` is the actual safe-area scene size, including any Duo compatibility bounds.
+    private func applyDefaultZoom() {
+        guard size.width > 0 else { return }
+        let tilesAcross: CGFloat = size.width >= 580 && size.height >= 500 ? 14 : 9
+        cameraNode.setScale(max(0.55, min(2.6, tilesAcross * halfWidth * 2 / size.width)))
     }
 
     private func point(x: Int32, y: Int32) -> CGPoint {
@@ -313,6 +323,7 @@ final class IslandScene: SKScene {
             let newDistance = hypot(p0.x - p1.x, p0.y - p1.y)
             if newDistance > 5 {
                 cameraNode.setScale(max(0.55, min(2.6, cameraNode.xScale * oldDistance / newDistance)))
+                cameraUserAdjusted = true
                 refreshVisible()
             }
             wasDragged = true
@@ -320,6 +331,7 @@ final class IslandScene: SKScene {
             let p = touch.location(in: self), previous = touch.previousLocation(in: self)
             cameraNode.position.x -= p.x - previous.x
             cameraNode.position.y -= p.y - previous.y
+            cameraUserAdjusted = true
             if let touchStart, hypot(p.x - touchStart.x, p.y - touchStart.y) > 8 { wasDragged = true }
             refreshVisible()
         }
