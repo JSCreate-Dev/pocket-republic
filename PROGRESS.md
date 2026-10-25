@@ -32,7 +32,7 @@ CI uploads an unsigned device IPA for sideloading. `.github/workflows/unsigned-i
 
 ### Unverified
 
-Run `40206715750` on this branch is green: Xcode 27.1 (`27A9275`), artifact `PocketRepublic-unsigned-ipa`, `CFBundleIdentifier` `com.jscreate.pocketrepublic`, `DTSDKName` `iphoneos27.1`. The signed upload was skipped because the optional secrets are unset. A run of the main-and-pull-request trigger added in this merge is not finished yet. The workflow builds a generic `iphoneos` app and does not boot the Duo simulator. `macos-latest` / `macos-26` still stop at Xcode 26.6, so they cannot compile `reservedRegions`.
+The pull-request run for this merge is not finished yet. The workflow builds a generic `iphoneos` app and does not boot the Duo simulator. `macos-latest` / `macos-26` still stop at Xcode 26.6, so they cannot compile `reservedRegions`.
 
 The Xcode project still says `CreatedOnToolsVersion = 15.0` and `LastUpgradeCheck = 1500`. Jordan's iPhone playtest is recorded below. Which binary that was is not in the repo. Later test builds should sideload the unsigned IPA from the main or pull-request run.
 
