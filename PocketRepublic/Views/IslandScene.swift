@@ -449,12 +449,13 @@ final class IslandScene: SKScene {
     /// sprite along the core path between those hours.
     private func applyWalker(_ node: SKSpriteNode, citizen: Citizen, routine: DailyRoutine,
                              map: WorldMap, time: TimeInterval) {
-        guard let pose = walkerPose(routine, at: time, map: map) else { return }
+        let localTime = time + walkerPhase(for: citizen.id)
+        guard let pose = walkerPose(routine, at: localTime, map: map) else { return }
         node.position = pose.position
         node.zPosition = pose.sort
         let facing = pose.facing ?? walkerFacing[citizen.id] ?? .sw
         if pose.moving { walkerFacing[citizen.id] = facing }
-        let frame = pose.moving ? Int(time / 0.15) % 2 : 0
+        let frame = pose.moving ? Int(localTime / 0.15) % 2 : 0
         let variant = Int(UInt32(bitPattern: citizen.id.raw) % 6)
         node.texture = MapArt.walkerTexture(variant: variant, facing: facing, frame: frame) ?? proceduralWalker
         node.size = MapArt.walkerSize
@@ -465,6 +466,13 @@ final class IslandScene: SKScene {
         } else {
             node.colorBlendFactor = 0
         }
+    }
+
+    /// A stable visual-only offset spreads arrivals across most of one simulated hour.
+    /// The core routine and its hourly stops remain the same for every citizen.
+    private func walkerPhase(for id: CitizenID) -> TimeInterval {
+        let hash = UInt32(bitPattern: id.raw) &* 2_654_435_761
+        return Double(hash >> 24) / 255 * MapArt.secondsPerHour * 0.75
     }
 
     private func walkerPose(_ routine: DailyRoutine, at time: TimeInterval, map: WorldMap) -> WalkerPose? {
