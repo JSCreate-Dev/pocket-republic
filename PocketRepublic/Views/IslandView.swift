@@ -1,5 +1,6 @@
 import SwiftUI
 import SpriteKit
+import UIKit
 import PocketRepublicCore
 
 /// Screen-space controls use the local scene geometry and Apple's reserved regions.
@@ -11,7 +12,9 @@ struct IslandView: View {
     @State private var scene = IslandScene(size: CGSize(width: 400, height: 470))
     @State private var tool: CityTool = .inspect
     @State private var selectedTile: TileIndex?
+    @State private var selectedBuildingID: BuildingID?
     @State private var selectedAgendaID: DecisionID?
+    @State private var placementHint: String?
 
     var body: some View {
         GeometryReader { geometry in
@@ -32,17 +35,31 @@ struct IslandView: View {
                 scene.scaleMode = .resizeFill
                 scene.setFraming(layout.framing)
                 scene.render(game.state)
+                scene.setSelection(selectedBuildingID)
                 configureTapHandler()
+            }
+            .sensoryFeedback(.selection, trigger: selectedBuildingID) { _, newValue in
+                newValue != nil
             }
             .onChange(of: layout.framing) { _, framing in
                 scene.setFraming(framing)
             }
         }
         .onReceive(game.$state) { state in
+            if let selectedBuildingID,
+               BuildingHitTest.occupiedTiles(selectedBuildingID, on: state.map).isEmpty {
+                self.selectedBuildingID = nil
+            }
             scene.render(state)
             if let selectedAgendaID, !state.agenda.contains(where: { $0.id == selectedAgendaID }) {
                 self.selectedAgendaID = nil
             }
+        }
+        .onChange(of: selectedBuildingID) { _, id in
+            scene.setSelection(id)
+        }
+        .onChange(of: tool) { _, newTool in
+            if newTool != .inspect { selectedBuildingID = nil }
         }
     }
 
@@ -58,7 +75,19 @@ struct IslandView: View {
             } else if let item = selectedAgenda {
                 agendaCard(item, layout: layout)
             } else {
-                if let selectedTile {
+                if let inspection = buildingInspection {
+                    BuildingInspectPanel(
+                        inspection: inspection,
+                        onClose: { selectedBuildingID = nil },
+                        onSetMode: { mode in
+                            game.send(.setOperatingMode(inspection.buildingID, mode))
+                        },
+                        onDemolish: {
+                            game.send(.demolish(inspection.buildingID))
+                        }
+                    )
+                    .frame(maxWidth: layout.cardWidth, alignment: .leading)
+                } else if let selectedTile {
                     let x = game.state.map.x(of: selectedTile)
                     let y = game.state.map.y(of: selectedTile)
                     Text("Tile \(x), \(y) · \(terrainLabel(at: selectedTile))")
@@ -100,7 +129,14 @@ struct IslandView: View {
                 metric("Food", "\(game.snapshot.foodInStores)")
                 metric("Happy", "\(game.snapshot.meanHappiness)%")
             }
-            if let feedback = game.feedback {
+            if tool.isBuilding {
+                if let placementHint {
+                    Text(placementHint)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.orange)
+                        .lineLimit(layout.scrollControls ? nil : 3)
+                }
+            } else if let feedback = game.feedback {
                 Text(feedback).font(.caption).foregroundStyle(.orange)
                     .lineLimit(layout.scrollControls ? nil : 2)
             }
@@ -316,12 +352,38 @@ struct IslandView: View {
         return String(describing: map.terrain(at: tile)).capitalized
     }
 
+    private var buildingInspection: BuildingInspection? {
+        guard tool == .inspect, let selectedBuildingID else { return nil }
+        return BuildingInspector.make(id: selectedBuildingID, in: game.state)
+    }
+
     private func configureTapHandler() {
         let activeTool = tool
+        scene.onPlacementHint = { hint in
+            Task { @MainActor in
+                if placementHint != hint { placementHint = hint }
+            }
+        }
+        scene.setPlacementKind(activeTool.buildingKind, fallbackHover: selectedTile)
         scene.onTileTap = { tile in
             Task { @MainActor in
-                selectedTile = tile
-                if let intent = activeTool.intent(at: tile) { game.send(intent) }
+                if activeTool == .inspect {
+                    if let building = BuildingHitTest.building(on: tile, in: game.state) {
+                        selectedBuildingID = building.id
+                        selectedTile = nil
+                    } else {
+                        selectedBuildingID = nil
+                        selectedTile = tile
+                    }
+                } else {
+                    selectedTile = tile
+                    guard game.saveIssue == nil, let intent = activeTool.intent(at: tile) else { return }
+                    game.send(intent)
+                    if activeTool.isBuilding, game.feedback == nil {
+                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                        scene.hidePlacementGhost()
+                    }
+                }
             }
         }
     }
@@ -453,19 +515,24 @@ private enum CityTool: String, CaseIterable, Identifiable {
         }
     }
 
-    func intent(at tile: TileIndex) -> PlayerIntent? {
+    var buildingKind: BuildingKind? {
         switch self {
-        case .inspect: return nil
-        case .road: return .buildRoad(at: tile)
-        case .house: return .placeBuilding(.house, at: tile)
-        case .farm: return .placeBuilding(.farm, at: tile)
-        case .market: return .placeBuilding(.market, at: tile)
-        case .clinic: return .placeBuilding(.clinic, at: tile)
-        case .school: return .placeBuilding(.school, at: tile)
-        case .police: return .placeBuilding(.police, at: tile)
-        case .workshop: return .placeBuilding(.workshop, at: tile)
-        case .dock: return .placeBuilding(.dock, at: tile)
+        case .inspect, .road: return nil
+        case .house: return .house
+        case .farm: return .farm
+        case .market: return .market
+        case .clinic: return .clinic
+        case .school: return .school
+        case .police: return .police
+        case .workshop: return .workshop
+        case .dock: return .dock
         }
+    }
+
+    func intent(at tile: TileIndex) -> PlayerIntent? {
+        if let kind = buildingKind { return .placeBuilding(kind, at: tile) }
+        if self == .road { return .buildRoad(at: tile) }
+        return nil
     }
 }
 

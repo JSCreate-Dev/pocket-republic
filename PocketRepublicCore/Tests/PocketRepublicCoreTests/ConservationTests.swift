@@ -49,7 +49,10 @@ final class ConservationTests: XCTestCase {
     }
 
     func testCrisisResolutionsDoNotMintMoney() throws {
-        var s = WorldGenerator.generate(seed: 555, citizenCount: 250)
+        // Seed 555 stays calm once surplus hunger is fixed (unrest never rises, so
+        // the old famine does not trip). 314 still raises district uprisings, which
+        // is the path this check has to walk.
+        var s = WorldGenerator.generate(seed: 314, citizenCount: 250)
         var resolved = 0
         for _ in 0..<600 {
             if let p = s.pending {

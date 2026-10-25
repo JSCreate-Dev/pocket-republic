@@ -7,6 +7,9 @@ public enum PlayerIntent: Sendable, Equatable {
     case placeBuilding(BuildingKind, at: TileIndex)
     case buildRoad(at: TileIndex)
     case demolish(BuildingID)
+    /// How a farm, workshop, or dock is run. Writes the same `OperatingMode` the
+    /// placement commission already applies. It does not move money or food.
+    case setOperatingMode(BuildingID, OperatingMode)
     case setPolicy(Policy)
     case resolveDecision(DecisionID, option: Int32)
     /// Answer anything on the standing agenda: a faction demand, an advisory, a
@@ -16,10 +19,12 @@ public enum PlayerIntent: Sendable, Equatable {
 
 public enum IntentRejection: String, Sendable, Equatable {
     case outOfBounds, notBuildable, occupied, notConnectedToRoad
+    case notEnoughFertileLand, notTouchingWater
     case insufficientTreasury, noSuchBuilding, cannotDemolishTownHall
     case noPendingDecision, decisionMismatch, invalidOption
     case noSuchAgendaItem
     case crisisPendingBlocksBuilding
+    case operatingModeNotOffered
 }
 
 public enum IntentResult: Sendable, Equatable {
@@ -33,19 +38,18 @@ extension SimulationEngine {
         switch intent {
 
         case .placeBuilding(let kind, let tile):
-            if s.pending != nil { return .rejected(.crisisPendingBlocksBuilding) }
-            guard Int(tile.raw) >= 0 && Int(tile.raw) < s.map.tileCount else { return .rejected(.outOfBounds) }
-            guard s.map.terrain(at: tile).buildable else { return .rejected(.notBuildable) }
-            guard s.map.building(at: tile) == nil, !s.map.isRoad(at: tile) else { return .rejected(.occupied) }
-            guard WorldGenerator.touchesRoad(s.map, tile) else { return .rejected(.notConnectedToRoad) }
-            guard s.treasury >= kind.buildCost else { return .rejected(.insufficientTreasury) }
-
-            s.transfer(from: .treasury, to: .external, kind.buildCost)
-            let id = WorldGenerator.construct(&s, kind, at: tile)
-            let site = EventLocation(district: s.map.district(at: tile), building: id, tile: tile)
-            s.emit(.buildingConstructed, location: site, magnitude: Int32(kind.buildCost))
-            if kind.offersCommission { raiseCommission(&s, building: id, at: site) }
-            return .accepted
+            switch validatePlacement(kind, at: tile, in: s) {
+            case .rejected(let reason):
+                return .rejected(reason)
+            case .valid(let entrance):
+                s.transfer(from: .treasury, to: .external, kind.buildCost)
+                let id = WorldGenerator.construct(&s, kind, anchor: tile, entrance: entrance)
+                let built = s.buildings[Int(id.raw)]
+                let site = EventLocation(district: built.district, building: id, tile: built.entrance)
+                s.emit(.buildingConstructed, location: site, magnitude: Int32(kind.buildCost))
+                if kind.offersCommission { raiseCommission(&s, building: id, at: site) }
+                return .accepted
+            }
 
         case .buildRoad(let tile):
             if s.pending != nil { return .rejected(.crisisPendingBlocksBuilding) }
@@ -73,10 +77,30 @@ extension SimulationEngine {
             }
             s.buildings[Int(id.raw)].residents = []
             s.buildings[Int(id.raw)].workers = []
-            s.map.buildingAt[Int(b.tile.raw)] = -1
+            for covered in b.tilesCovered(on: s.map) {
+                let index = Int(covered.raw)
+                // Only clear tiles this building still owns, so a second demolish
+                // cannot erase whatever was built on the same ground later.
+                guard s.map.buildingAt[index] == id.raw else { continue }
+                s.map.buildingAt[index] = -1
+                s.map.entranceAt[index] = false
+            }
             s.fields.markDirty()
             s.emit(.buildingAbandoned,
                    location: EventLocation(district: b.district, building: id, tile: b.tile))
+            return .accepted
+
+        case .setOperatingMode(let id, let mode):
+            guard Int(id.raw) >= 0, Int(id.raw) < s.buildings.count else {
+                return .rejected(.noSuchBuilding)
+            }
+            guard !BuildingOccupancy.tiles(of: id, on: s.map).isEmpty else {
+                return .rejected(.noSuchBuilding)
+            }
+            guard s.buildings[Int(id.raw)].kind.offersCommission else {
+                return .rejected(.operatingModeNotOffered)
+            }
+            s.buildings[Int(id.raw)].mode = mode
             return .accepted
 
         case .setPolicy(let p):

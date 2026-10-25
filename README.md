@@ -1,14 +1,16 @@
 # Pocket Republic iOS project
 
-Open `PocketRepublic.xcodeproj` in Xcode 16.4 or later. The app targets iOS 17+ and links the local `PocketRepublicCore` Swift package. This package is the spatial city simulation from `/home/jsmith/projects/pocket-republic/core/` (copied here so the Xcode project is self-contained). The app sends `PlayerIntent` values to `SimulationEngine` and draws a read-only `WorldSnapshot` in SpriteKit.
+Open `PocketRepublic.xcodeproj` in Xcode 27.1 or later. The app targets iOS 17+ and links the local `PocketRepublicCore` Swift package. This package is the spatial city simulation from `/home/jsmith/projects/pocket-republic/core/` (copied here so the Xcode project is self-contained). The app sends `PlayerIntent` values to `SimulationEngine` and draws a read-only `WorldSnapshot` in SpriteKit.
 
 The island tab now renders terrain, roads, buildings, camera pan/zoom, placement tools, a small moving crowd, and cosmetic day/night lighting. The simple colored building blocks are integration art, not final sprites. The simulation only advances when **Advance One Day** is pressed; animated walkers and lighting never advance or randomize the core.
 
-## Build an unsigned IPA
+## Build an IPA
 
-With this directory at the root of a GitHub repository, a push or manual dispatch runs `.github/workflows/unsigned-ipa.yml` on a macOS 15 runner with Xcode 16.4. The workflow runs core tests, builds the iOS device app with signing disabled, then uploads `PocketRepublic-unsigned.ipa` and its SHA-256 hash as an artifact. Extract the artifact ZIP before using the IPA in an on-device signing app. An actual Apple SDK build and on-device run of this spatial integration are still required.
+Pushes, including every merge to `main`, and pull requests run `.github/workflows/unsigned-ipa.yml` on the GitHub-hosted `xcode-27` runner with Xcode 27.1. That image is the hosted runner that includes the iOS 27.1 SDK. The workflow runs the core tests, builds an unsigned device IPA, and uploads `PocketRepublic-unsigned.ipa` plus its SHA-256. That unsigned IPA is the test-build artifact: unzip it and sideload it. It does not need Apple signing secrets.
 
-The bundle ID is currently the placeholder `com.example.PocketRepublic`. Change it if your signing method requires a different ID. The workflow does not sign or install the app. An iPhone alone cannot compile the SwiftUI project; compilation needs Xcode on macOS or macOS CI.
+When the optional repository secrets listed in `PROGRESS.md` are all set, the same workflow also exports a signed IPA and uploads `PocketRepublic-signed.ipa`. The default export method is ad hoc.
+
+The bundle identifier is `com.jscreate.pocketrepublic`, defined in `Config/PocketRepublic.xcconfig`. An iPhone alone cannot compile the SwiftUI project.
 
 ## Saves
 

@@ -23,9 +23,12 @@ extension RepublicState {
         let meanH = alive.isEmpty ? 0 : Int32(alive.reduce(into: Int64(0)) { $0 += Int64($1.happiness) } / Int64(alive.count))
         var visible = buildings
         if let r = visibleRect {
-            visible = buildings.filter {
-                let x = map.x(of: $0.tile), y = map.y(of: $0.tile)
-                return x >= r.x0 && x <= r.x1 && y >= r.y0 && y <= r.y1
+            visible = buildings.filter { building in
+                let x0 = map.x(of: building.anchor)
+                let y0 = map.y(of: building.anchor)
+                let x1 = x0 + building.kind.footprint.width - 1
+                let y1 = y0 + building.kind.footprint.height - 1
+                return x1 >= r.x0 && x0 <= r.x1 && y1 >= r.y0 && y0 <= r.y1
             }
         }
         return WorldSnapshot(day: day, treasury: treasury, population: Int32(alive.count),
