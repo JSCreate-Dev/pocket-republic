@@ -1,6 +1,6 @@
 # Pocket Republic: Art Direction
 
-Status: v1, set by Visual And Grapchics (Oct 25, 2026). v1 building sprites are in.
+Status: v1 building catalog, with corrected non-square footprint bases (Oct 25, 2026).
 
 ## The feel
 A sunny, slightly tongue-in-cheek tropical island republic: think a cozy toy-diorama version of Tropico. Warm, readable and friendly, never gritty. Politics come through in the props and the town hall (flags, balconies, pastel colonial facades), not through darkness.
@@ -77,9 +77,9 @@ Asset names are `building_` plus the `BuildingKind` case name:
 - `building_workshop`
 - `building_dock`
 
-### v1 limitation
+### Non-square bases
 
-The 3×2 and 2×3 sprites are drawn on square bases, so the base reads slightly off on non-square footprints (Market, Workshop, and Dock). A v2 pass will redraw those. Dock's water edge is the front-right side.
+Market and workshop use separately composed 3×2 diamonds with their long axis on +x. Dock uses a 2×3 diamond with its long axis on +y and a water strip along the right shore. All three retain their existing image names, canvas sizes, and `(0.5, 0)` SpriteKit anchor.
 
 ## Citizens
 Tiny 2-3 color figures (about 6x10 px at 1x). Hungry citizens keep the existing orange tint so the hunger signal stays readable.
