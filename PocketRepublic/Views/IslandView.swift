@@ -15,19 +15,60 @@ struct IslandView: View {
     @State private var selectedBuildingID: BuildingID?
     @State private var selectedAgendaID: DecisionID?
     @State private var placementHint: String?
+    @State private var sheetExpanded = false
+    @State private var tentMode = false
+    @State private var tentControlsOpen = false
 
     var body: some View {
         GeometryReader { geometry in
             let layout = CityDisplayLayout(geometry: geometry,
                                            verticalSizeClass: verticalSizeClass,
-                                           layoutDirection: layoutDirection)
+                                           layoutDirection: layoutDirection,
+                                           tentMode: tentMode,
+                                           sheetExpanded: sheetExpanded,
+                                           tentControlsOpen: tentControlsOpen)
             ZStack(alignment: .topLeading) {
                 SpriteView(scene: scene)
                     .background(Color(red: 0.05, green: 0.22, blue: 0.37))
 
-                controls(in: layout)
-                    .frame(width: layout.controls.width, height: layout.controls.height)
-                    .position(x: layout.controls.midX, y: layout.controls.midY)
+                if layout.isSingleScreen {
+                    HStack(alignment: .top, spacing: 8) {
+                        status(in: layout)
+                        if layout.canUseTent {
+                            Button {
+                                tentMode.toggle()
+                                tentControlsOpen = false
+                                sheetExpanded = false
+                            } label: {
+                                Label(tentMode ? "Single screen" : "Tent view",
+                                      systemImage: "rectangle.split.2x1")
+                                    .font(.caption.weight(.semibold))
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .accessibilityHint("Changes the outer display between a bottom panel and a map-first tent view")
+                        }
+                    }
+                    .padding(8)
+                    .frame(maxWidth: .infinity, alignment: .topLeading)
+                }
+
+                if layout.mode == .tent && !tentControlsOpen {
+                    tentDock()
+                        .frame(width: layout.controls.width, height: layout.controls.height)
+                        .position(x: layout.controls.midX, y: layout.controls.midY)
+                } else {
+                    controls(in: layout)
+                        .frame(width: layout.controls.width, height: layout.controls.height)
+                        .background {
+                            if layout.isSingleScreen {
+                                UnevenRoundedRectangle(topLeadingRadius: 18, topTrailingRadius: 18)
+                                    .fill(.regularMaterial)
+                            } else {
+                                Rectangle().fill(.regularMaterial)
+                            }
+                        }
+                        .position(x: layout.controls.midX, y: layout.controls.midY)
+                }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .clipShape(RoundedRectangle(cornerRadius: 12))
@@ -65,7 +106,31 @@ struct IslandView: View {
 
     @ViewBuilder private func controls(in layout: CityDisplayLayout) -> some View {
         let content = VStack(spacing: 8) {
-            status(in: layout)
+            if layout.isSingleScreen {
+                HStack {
+                    Button {
+                        sheetExpanded.toggle()
+                    } label: {
+                        Capsule().fill(.secondary).frame(width: 40, height: 5)
+                            .frame(maxWidth: .infinity, minHeight: 28)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(sheetExpanded ? "Collapse controls" : "Expand controls")
+                    if layout.mode == .tent {
+                        Button("Hide controls", systemImage: "chevron.down") {
+                            tentControlsOpen = false
+                            sheetExpanded = false
+                        }
+                        .font(.caption)
+                    }
+                }
+                .simultaneousGesture(DragGesture(minimumDistance: 20).onEnded { value in
+                    if value.translation.height < -40 { sheetExpanded = true }
+                    if value.translation.height > 40 { sheetExpanded = false }
+                })
+            } else {
+                status(in: layout)
+            }
             if game.state.pending == nil && selectedAgenda == nil {
                 agendaPreviews(layout: layout)
             }
@@ -111,10 +176,28 @@ struct IslandView: View {
 
         if layout.scrollControls {
             ScrollView(.vertical, showsIndicators: false) { content }
-                .background(.thinMaterial)
         } else {
             content
         }
+    }
+
+    private func tentDock() -> some View {
+        Button {
+            tentControlsOpen = true
+        } label: {
+            HStack {
+                Label("Open city controls", systemImage: "slider.horizontal.3")
+                Spacer()
+                Text("Day \(game.snapshot.day)")
+                Image(systemName: "chevron.up")
+            }
+            .font(.subheadline.weight(.semibold))
+            .padding(.horizontal, 16)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+        .buttonStyle(.plain)
+        .background(.regularMaterial, in: UnevenRoundedRectangle(topLeadingRadius: 18, topTrailingRadius: 18))
+        .accessibilityHint("Shows tools, decisions, and the Next Day button")
     }
 
     private func status(in layout: CityDisplayLayout) -> some View {
@@ -389,11 +472,11 @@ struct IslandView: View {
     }
 }
 
-/// Uses the offered safe-area bounds, then the fold's active reserved region when present.
-/// A partial book fold gets a right/left control pane; a laptop fold gets a lower pane.
-/// Tent posture on the outer display is an ordinary compact-height landscape layout.
+/// A single display keeps the map full-width with a draggable bottom panel.
+/// A spanned inner display assigns the world and controls to separate panes.
+/// Tent view is selected on the outer landscape display because that posture has no distinct scene signal.
 private struct CityDisplayLayout {
-    enum Mode { case singlePortrait, singleLandscape, innerFlat, bookFold, laptopFold }
+    enum Mode { case singlePortrait, singleLandscape, tent, spannedFlat, bookFold, laptopFold }
     let mode: Mode
     let size: CGSize
     let focus: CGRect
@@ -401,7 +484,8 @@ private struct CityDisplayLayout {
     let occlusionTopInset: CGFloat
 
     init(geometry: GeometryProxy, verticalSizeClass: UserInterfaceSizeClass?,
-         layoutDirection: LayoutDirection) {
+         layoutDirection: LayoutDirection, tentMode: Bool,
+         sheetExpanded: Bool, tentControlsOpen: Bool) {
         let size = geometry.size
         self.size = size
         let bounds = CGRect(origin: .zero, size: size)
@@ -432,27 +516,36 @@ private struct CityDisplayLayout {
                 controls = CGRect(x: 0, y: seam.maxY, width: size.width,
                                   height: max(0, size.height - seam.maxY))
             }
-        } else if verticalSizeClass == .compact && size.width > size.height {
-            mode = .singleLandscape
-            let railWidth = min(300, max(220, size.width * 0.36))
-            focus = CGRect(x: 0, y: 0, width: size.width - railWidth, height: size.height)
-            controls = CGRect(x: size.width - railWidth, y: 0,
-                              width: railWidth, height: size.height)
         } else if size.width >= 580 && size.height >= 500 {
-            mode = .innerFlat
-            let railWidth = min(380, size.width * 0.42)
-            focus = CGRect(x: 0, y: 0, width: size.width - railWidth, height: size.height)
-            controls = CGRect(x: size.width - railWidth, y: 0,
-                              width: railWidth, height: size.height)
+            mode = .spannedFlat
+            let paneWidth = size.width / 2
+            if layoutDirection == .rightToLeft {
+                controls = CGRect(x: 0, y: 0, width: paneWidth, height: size.height)
+                focus = CGRect(x: paneWidth, y: 0, width: paneWidth, height: size.height)
+            } else {
+                focus = CGRect(x: 0, y: 0, width: paneWidth, height: size.height)
+                controls = CGRect(x: paneWidth, y: 0, width: paneWidth, height: size.height)
+            }
         } else {
-            mode = .singlePortrait
-            let railWidth = min(190, max(160, size.width * 0.38))
-            focus = CGRect(x: 0, y: 0, width: max(0, size.width - railWidth), height: size.height)
-            controls = CGRect(x: size.width - railWidth, y: 0,
-                              width: railWidth, height: size.height)
+            let landscape = size.width > size.height &&
+                (verticalSizeClass == .compact || size.height < 500)
+            mode = landscape ? (tentMode ? .tent : .singleLandscape) : .singlePortrait
+            let height: CGFloat
+            if mode == .tent && !tentControlsOpen {
+                height = 72
+            } else if sheetExpanded {
+                height = size.height * 0.82
+            } else {
+                height = size.height * (landscape ? 0.58 : 0.5)
+            }
+            let panelHeight = min(size.height, max(0, height))
+            focus = CGRect(x: 0, y: 0, width: size.width,
+                           height: max(0, size.height - panelHeight))
+            controls = CGRect(x: 0, y: size.height - panelHeight,
+                              width: size.width, height: panelHeight)
         }
-        // Standard containers handle safe areas. This extra check protects our
-        // manually positioned panel from an active camera occlusion inside them.
+        // Standard containers handle safe areas. This check protects a manual
+        // control pane from a camera occlusion that lands inside it.
         let panel = controls
         if #available(iOS 27.1, *) {
             occlusionTopInset = geometry.reservedRegions(kind: .occlusion)
@@ -465,30 +558,35 @@ private struct CityDisplayLayout {
         }
     }
 
+    var isSingleScreen: Bool {
+        switch mode {
+        case .singlePortrait, .singleLandscape, .tent: return true
+        case .spannedFlat, .bookFold, .laptopFold: return false
+        }
+    }
+    var canUseTent: Bool { mode == .singleLandscape || mode == .tent }
     var visibleCards: Int {
         switch mode {
-        case .innerFlat, .bookFold, .laptopFold: return 2
-        case .singlePortrait, .singleLandscape: return 1
+        case .spannedFlat, .bookFold, .laptopFold: return 2
+        case .singlePortrait, .singleLandscape, .tent: return 1
         }
     }
     var stackedPreviews: Bool { controls.width < 500 }
     var compactTools: Bool { mode != .laptopFold }
     var scrollControls: Bool {
-        (mode == .singlePortrait && controls.height - occlusionTopInset < 450) || mode == .singleLandscape || mode == .laptopFold || controls.height - occlusionTopInset < 360
+        isSingleScreen || mode == .laptopFold || controls.height - occlusionTopInset < 360
     }
     var cardWidth: CGFloat { max(0, min(controls.width - 36, 360)) }
     var optionListHeight: CGFloat {
-        let rows: CGFloat = scrollControls ? 2 : (mode == .singlePortrait ? 2 : 3)
+        let rows: CGFloat = scrollControls ? 2 : 3
         return rows * 52
     }
     var framing: CameraFraming {
         let tiles: CGFloat
         switch mode {
-        case .singlePortrait: tiles = 8
-        case .singleLandscape: tiles = 8
-        case .innerFlat: tiles = 12
-        case .bookFold: tiles = 8
-        case .laptopFold: tiles = 12
+        case .singlePortrait, .singleLandscape, .bookFold: tiles = 8
+        case .tent: tiles = 10
+        case .spannedFlat, .laptopFold: tiles = 12
         }
         return CameraFraming(viewSize: size, focusRect: focus, tileWidths: tiles)
     }
