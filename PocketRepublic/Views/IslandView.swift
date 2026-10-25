@@ -11,6 +11,7 @@ struct IslandView: View {
     @State private var scene = IslandScene(size: CGSize(width: 400, height: 470))
     @State private var tool: CityTool = .inspect
     @State private var selectedTile: TileIndex?
+    @State private var selectedBuildingID: BuildingID?
     @State private var selectedAgendaID: DecisionID?
 
     var body: some View {
@@ -32,17 +33,31 @@ struct IslandView: View {
                 scene.scaleMode = .resizeFill
                 scene.setFraming(layout.framing)
                 scene.render(game.state)
+                scene.setSelection(selectedBuildingID)
                 configureTapHandler()
+            }
+            .sensoryFeedback(.selection, trigger: selectedBuildingID) { _, newValue in
+                newValue != nil
             }
             .onChange(of: layout.framing) { _, framing in
                 scene.setFraming(framing)
             }
         }
         .onReceive(game.$state) { state in
+            if let selectedBuildingID,
+               BuildingHitTest.occupiedTiles(selectedBuildingID, on: state.map).isEmpty {
+                self.selectedBuildingID = nil
+            }
             scene.render(state)
             if let selectedAgendaID, !state.agenda.contains(where: { $0.id == selectedAgendaID }) {
                 self.selectedAgendaID = nil
             }
+        }
+        .onChange(of: selectedBuildingID) { _, id in
+            scene.setSelection(id)
+        }
+        .onChange(of: tool) { _, newTool in
+            if newTool != .inspect { selectedBuildingID = nil }
         }
     }
 
@@ -58,7 +73,19 @@ struct IslandView: View {
             } else if let item = selectedAgenda {
                 agendaCard(item, layout: layout)
             } else {
-                if let selectedTile {
+                if let inspection = buildingInspection {
+                    BuildingInspectPanel(
+                        inspection: inspection,
+                        onClose: { selectedBuildingID = nil },
+                        onSetMode: { mode in
+                            game.send(.setOperatingMode(inspection.buildingID, mode))
+                        },
+                        onDemolish: {
+                            game.send(.demolish(inspection.buildingID))
+                        }
+                    )
+                    .frame(maxWidth: layout.cardWidth, alignment: .leading)
+                } else if let selectedTile {
                     let x = game.state.map.x(of: selectedTile)
                     let y = game.state.map.y(of: selectedTile)
                     Text("Tile \(x), \(y) · \(terrainLabel(at: selectedTile))")
@@ -316,12 +343,27 @@ struct IslandView: View {
         return String(describing: map.terrain(at: tile)).capitalized
     }
 
+    private var buildingInspection: BuildingInspection? {
+        guard tool == .inspect, let selectedBuildingID else { return nil }
+        return BuildingInspector.make(id: selectedBuildingID, in: game.state)
+    }
+
     private func configureTapHandler() {
         let activeTool = tool
         scene.onTileTap = { tile in
             Task { @MainActor in
-                selectedTile = tile
-                if let intent = activeTool.intent(at: tile) { game.send(intent) }
+                if activeTool == .inspect {
+                    if let building = BuildingHitTest.building(on: tile, in: game.state) {
+                        selectedBuildingID = building.id
+                        selectedTile = nil
+                    } else {
+                        selectedBuildingID = nil
+                        selectedTile = tile
+                    }
+                } else {
+                    selectedTile = tile
+                    if let intent = activeTool.intent(at: tile) { game.send(intent) }
+                }
             }
         }
     }
