@@ -13,7 +13,7 @@ Read [PROGRESS.md](PROGRESS.md) before you change anything. The **North star** a
 1. Read `PROGRESS.md` (North star, Current state, open items, the latest log).
 2. Read `docs/DESIGN.md` before touching buildings, placement, inspect, art, the Duo layout, decree cards, or the event feed.
 3. Work on a feature branch and open a pull request. Never push to `main`.
-4. Keep the pull request small and inside one role's area. The locked split and the merge order are in `PROGRESS.md`: **Game Logic's footprint-core PR merges first.** Ios Dev builds the ghost preview, rendering, the inspect panel, and CI on that core API. Do not implement both sides in one pull request.
+4. Keep the pull request small and inside one role's area. Roles, the merge rule, and what to build next are in `PROGRESS.md` under **Team and process** and **Next round**. Do not implement two roles in one pull request. The footprint-core pull request has already merged.
 5. In the same pull request, overwrite **Current state** in `PROGRESS.md` so it matches the tree after your change. Do not add a new **Log** entry there. Write `docs/log/YYYY-MM-DD-<short-branch>.md` instead: date and time in EDT, agent or role, branch or PR, what changed, what you verified (tests, CI, device), and next steps or blockers. Entries already in the `PROGRESS.md` log stay there.
 6. Leave `FINDINGS.md` as history. Do not treat it as the current plan.
 
