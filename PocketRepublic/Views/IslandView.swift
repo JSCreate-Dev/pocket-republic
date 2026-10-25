@@ -67,7 +67,7 @@ struct IslandView: View {
                         .padding(.vertical, 5)
                         .background(.regularMaterial, in: Capsule())
                 }
-                toolStrip(compact: layout.compactTools)
+                toolStrip(compact: layout.compactTools, narrow: layout.mode == .singlePortrait)
             }
             Button { game.advance() } label: {
                 Label("Advance One Day", systemImage: "forward.fill")
@@ -225,8 +225,29 @@ struct IslandView: View {
         .accessibilityElement(children: .contain)
     }
 
-    @ViewBuilder private func toolStrip(compact: Bool) -> some View {
-        if compact {
+    @ViewBuilder private func toolStrip(compact: Bool, narrow: Bool) -> some View {
+        if narrow {
+            HStack(spacing: 4) {
+                narrowToolButton(.inspect)
+                narrowToolButton(.road)
+                Menu {
+                    ForEach(CityTool.buildings) { option in
+                        Button(option.label, systemImage: option.symbol) {
+                            tool = option
+                            configureTapHandler()
+                        }
+                    }
+                } label: {
+                    Image(systemName: "building.2.fill")
+                        .frame(maxWidth: .infinity, minHeight: 44)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(tool.isBuilding ? .mint : .indigo)
+                .accessibilityLabel("Buildings tool")
+            }
+            .padding(4)
+            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
+        } else if compact {
             HStack(spacing: 6) {
                 toolButton(.inspect)
                 toolButton(.road)
@@ -256,6 +277,19 @@ struct IslandView: View {
             }
             .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
         }
+    }
+
+    private func narrowToolButton(_ option: CityTool) -> some View {
+        Button {
+            tool = option
+            configureTapHandler()
+        } label: {
+            Image(systemName: option.symbol)
+                .frame(maxWidth: .infinity, minHeight: 44)
+        }
+        .buttonStyle(.borderedProminent)
+        .tint(tool == option ? .mint : .indigo)
+        .accessibilityLabel("\(option.label) tool")
     }
 
     private func toolButton(_ option: CityTool) -> some View {
@@ -350,8 +384,10 @@ private struct CityDisplayLayout {
                               width: railWidth, height: size.height)
         } else {
             mode = .singlePortrait
-            focus = bounds
-            controls = bounds
+            let railWidth = min(190, max(160, size.width * 0.38))
+            focus = CGRect(x: 0, y: 0, width: max(0, size.width - railWidth), height: size.height)
+            controls = CGRect(x: size.width - railWidth, y: 0,
+                              width: railWidth, height: size.height)
         }
         // Standard containers handle safe areas. This extra check protects our
         // manually positioned panel from an active camera occlusion inside them.
@@ -376,7 +412,7 @@ private struct CityDisplayLayout {
     var stackedPreviews: Bool { controls.width < 500 }
     var compactTools: Bool { mode != .laptopFold }
     var scrollControls: Bool {
-        mode == .singleLandscape || mode == .laptopFold || controls.height - occlusionTopInset < 360
+        mode == .singlePortrait || mode == .singleLandscape || mode == .laptopFold || controls.height - occlusionTopInset < 360
     }
     var cardWidth: CGFloat { max(0, min(controls.width - 36, 360)) }
     var optionListHeight: CGFloat {
@@ -386,7 +422,7 @@ private struct CityDisplayLayout {
     var framing: CameraFraming {
         let tiles: CGFloat
         switch mode {
-        case .singlePortrait: tiles = 9
+        case .singlePortrait: tiles = 8
         case .singleLandscape: tiles = 8
         case .innerFlat: tiles = 12
         case .bookFold: tiles = 8

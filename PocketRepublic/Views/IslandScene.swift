@@ -20,6 +20,7 @@ final class IslandScene: SKScene {
     private var tileTextures: [String: SKTexture] = [:]
     private var routeCache: [RouteKey: [TileIndex]] = [:]
     private var visibleRect: TileRect?
+    private var animationTime: TimeInterval = 0
     private var cameraInitialized = false
     private var cameraUserAdjusted = false
     private var framing: CameraFraming?
@@ -58,6 +59,7 @@ final class IslandScene: SKScene {
         super.didChangeSize(oldSize)
         resizeNightLayer()
         if cameraInitialized && !cameraUserAdjusted { applyDefaultZoom() }
+        clampCameraToMap()
         refreshVisible(force: true)
     }
 
@@ -84,6 +86,7 @@ final class IslandScene: SKScene {
                 cameraNode.position = CGPoint(x: worldAtFocus.x - newX * cameraNode.xScale,
                                               y: worldAtFocus.y + newY * cameraNode.yScale)
             }
+            clampCameraToMap()
             refreshVisible(force: true)
         }
     }
@@ -108,6 +111,7 @@ final class IslandScene: SKScene {
             }
             cameraInitialized = true
         }
+        clampCameraToMap()
         refreshVisible(force: true)
     }
 
@@ -117,6 +121,18 @@ final class IslandScene: SKScene {
         guard usableWidth > 0 else { return }
         let tilesAcross = framing?.tileWidths ?? 9
         cameraNode.setScale(max(0.55, min(2.6, tilesAcross * halfWidth * 2 / usableWidth)))
+    }
+
+    /// Keep at least part of the island inside the camera after a fold, rotation, or pan.
+    private func clampCameraToMap() {
+        guard let map = renderedState?.map else { return }
+        let minX = -CGFloat(map.height - 1) * halfWidth
+        let maxX = CGFloat(map.width - 1) * halfWidth
+        let minY = -CGFloat(map.width + map.height - 2) * halfHeight
+        let padX = size.width * cameraNode.xScale * 0.25
+        let padY = size.height * cameraNode.yScale * 0.25
+        cameraNode.position.x = min(max(cameraNode.position.x, minX - padX), maxX + padX)
+        cameraNode.position.y = min(max(cameraNode.position.y, minY - padY), padY)
     }
 
     private func point(x: Int32, y: Int32) -> CGPoint {
@@ -231,34 +247,46 @@ final class IslandScene: SKScene {
 
     private func refreshPeople(state: RepublicState, rect: TileRect) {
         let map = state.map
-        let visible = state.citizens.filter { citizen in
+        // Retain already drawn walkers across small viewport changes. A route can
+        // cross the view even when both its home and workplace lie outside it.
+        let candidates = state.citizens.filter { citizen in
             guard citizen.alive, let home = citizen.home, let work = citizen.work,
                   Int(home.raw) < state.buildings.count, Int(work.raw) < state.buildings.count else { return false }
-            return rect.contains(state.buildings[Int(home.raw)].tile, in: map)
-                || rect.contains(state.buildings[Int(work.raw)].tile, in: map)
-        }.prefix(24)
+            return path(from: state.buildings[Int(home.raw)].tile,
+                        to: state.buildings[Int(work.raw)].tile, in: map)
+                .contains { rect.contains($0, in: map) }
+        }
+        let retained = candidates.filter { citizenNodes[$0.id] != nil }
+        let newcomers = candidates.filter { citizenNodes[$0.id] == nil }
+        let visible = Array((retained + newcomers).prefix(24))
         let wanted = Set(visible.map(\.id))
         visibleCitizenIDs = visible.map(\.id)
-        for citizen in visible where citizenNodes[citizen.id] == nil {
-            let node = SKShapeNode(circleOfRadius: 3)
-            node.fillColor = citizen.daysHungry > 0 ? .orange : .white
-            node.strokeColor = .black
-            node.lineWidth = 1
-            peopleLayer.addChild(node)
-            citizenNodes[citizen.id] = node
+        for citizen in visible {
+            if citizenNodes[citizen.id] == nil {
+                let node = SKShapeNode(circleOfRadius: 3)
+                node.fillColor = citizen.daysHungry > 0 ? .orange : .white
+                node.strokeColor = .black
+                node.lineWidth = 1
+                peopleLayer.addChild(node)
+                citizenNodes[citizen.id] = node
+            }
+            // Newly entered walkers start on their route, never at scene origin.
+            citizenNodes[citizen.id]?.position = position(for: citizen, at: animationTime, in: state)
         }
         for (id, node) in citizenNodes where !wanted.contains(id) {
             node.removeFromParent()
             citizenNodes.removeValue(forKey: id)
         }
 
-        let roads = tileNodes.keys.sorted().filter { map.road[Int($0)] }
-        let stride = max(1, roads.count / 12)
-        let wantedAmbient = Set(Swift.stride(from: 0, to: roads.count, by: stride).prefix(12).map { roads[$0] })
+        // Sample roads by stable tile ID so panning cannot reshuffle every extra.
+        let wantedAmbient = Set(tileNodes.keys.filter { raw in
+            map.road[Int(raw)] && (UInt32(bitPattern: raw) &* 2_654_435_761) % 7 == 0
+        })
         for raw in wantedAmbient where ambientNodes[raw] == nil {
             let node = SKShapeNode(circleOfRadius: 2)
             node.fillColor = .yellow
             node.strokeColor = .clear
+            node.position = point(for: TileIndex(raw), in: map)
             peopleLayer.addChild(node)
             ambientNodes[raw] = node
         }
@@ -271,6 +299,7 @@ final class IslandScene: SKScene {
     override func update(_ currentTime: TimeInterval) {
         guard let state = renderedState else { return }
         let map = state.map
+        animationTime = currentTime
         let phase = (currentTime / 100 + Double(state.day % 3) / 3).truncatingRemainder(dividingBy: 1)
         nightLayer.alpha = CGFloat(0.07 + 0.25 * (1 - cos(phase * .pi * 2)) / 2)
 
@@ -279,13 +308,7 @@ final class IslandScene: SKScene {
             let citizen = state.citizens[Int(id.raw)]
             guard let home = citizen.home, let work = citizen.work,
                   Int(home.raw) < state.buildings.count, Int(work.raw) < state.buildings.count else { continue }
-            let origin = state.buildings[Int(home.raw)].tile
-            let destination = state.buildings[Int(work.raw)].tile
-            let route = path(from: origin, to: destination, in: map)
-            let offset = Double(UInt32(bitPattern: citizen.id.raw &* 7 &+ state.day &* 11) % 20)
-            let t = (currentTime + offset).truncatingRemainder(dividingBy: 20)
-            let progress = t < 8 ? t / 8 : (t < 10 ? 1 : (t < 18 ? 1 - (t - 10) / 8 : 0))
-            citizenNodes[id]?.position = position(along: route, progress: progress, in: map)
+            citizenNodes[id]?.position = position(for: citizen, at: currentTime, in: state)
         }
         for (raw, node) in ambientNodes {
             let base = point(for: TileIndex(raw), in: map)
@@ -293,6 +316,17 @@ final class IslandScene: SKScene {
             node.position = CGPoint(x: base.x + CGFloat(sin(drift * 0.8) * 9),
                                     y: base.y + CGFloat(cos(drift * 0.8) * 3))
         }
+    }
+
+    private func position(for citizen: Citizen, at time: TimeInterval, in state: RepublicState) -> CGPoint {
+        guard let home = citizen.home, let work = citizen.work,
+              Int(home.raw) < state.buildings.count, Int(work.raw) < state.buildings.count else { return .zero }
+        let route = path(from: state.buildings[Int(home.raw)].tile,
+                         to: state.buildings[Int(work.raw)].tile, in: state.map)
+        let offset = Double(UInt32(bitPattern: citizen.id.raw &* 7 &+ state.day &* 11) % 20)
+        let t = (time + offset).truncatingRemainder(dividingBy: 20)
+        let progress = t < 8 ? t / 8 : (t < 10 ? 1 : (t < 18 ? 1 - (t - 10) / 8 : 0))
+        return position(along: route, progress: progress, in: state.map)
     }
 
     private func position(along path: [TileIndex], progress: Double, in map: WorldMap) -> CGPoint {
@@ -360,6 +394,7 @@ final class IslandScene: SKScene {
             if newDistance > 5 {
                 cameraNode.setScale(max(0.55, min(2.6, cameraNode.xScale * oldDistance / newDistance)))
                 cameraUserAdjusted = true
+                clampCameraToMap()
                 refreshVisible()
             }
             wasDragged = true
@@ -368,6 +403,7 @@ final class IslandScene: SKScene {
             cameraNode.position.x -= p.x - previous.x
             cameraNode.position.y -= p.y - previous.y
             cameraUserAdjusted = true
+            clampCameraToMap()
             if let touchStart, hypot(p.x - touchStart.x, p.y - touchStart.y) > 8 { wasDragged = true }
             refreshVisible()
         }
