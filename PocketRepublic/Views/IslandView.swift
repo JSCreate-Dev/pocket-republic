@@ -232,7 +232,7 @@ private struct DecisionCardBudget {
         compact = sceneSize.width < 580 || sceneSize.height < 500
         visibleCards = compact ? 1 : 2
         visibleOptionRows = compact ? 2 : 3
-        cardWidth = min(sceneSize.width - 40, compact ? 400 : 360)
+        cardWidth = max(0, min(sceneSize.width - 40, compact ? 400 : 360))
     }
 
     var optionListHeight: CGFloat { CGFloat(visibleOptionRows) * 52 }
