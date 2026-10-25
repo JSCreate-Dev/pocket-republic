@@ -1,0 +1,18 @@
+{
+ "0": "road_single",
+ "1": "road_end_n",
+ "2": "road_end_e",
+ "3": "road_corner_ne",
+ "4": "road_end_s",
+ "5": "road_straight_ns",
+ "6": "road_corner_es",
+ "7": "road_t_nes",
+ "8": "road_end_w",
+ "9": "road_corner_wn",
+ "10": "road_straight_ew",
+ "11": "road_t_wne",
+ "12": "road_corner_sw",
+ "13": "road_t_swn",
+ "14": "road_t_esw",
+ "15": "road_cross"
+}

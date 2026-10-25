@@ -10,7 +10,7 @@ Jordan wants Pocket Republic to feel like a lively, living world with a real gam
 
 ## Current state
 
-Snapshot of main `dd87c6e` (PR #2 squash-merge) plus this docs pass, read against the code on 2026-10-25. This environment has no Swift toolchain and no iPhone, so tests and the device build were not re-run here.
+Snapshot of main `b960f52` (PR #3, which includes PR #2) plus art batch 2 on this branch, read against the tree on 2026-10-25. This environment has no Swift toolchain and no iPhone, so tests and the device build were not re-run here.
 
 ### What works
 
@@ -39,7 +39,7 @@ Jordan's iPhone playtest is recorded below. Which binary that was, and whether C
 ### Known issues
 
 - **Hunger with food surplus.** [PocketRepublicCore/README.md](PocketRepublicCore/README.md) records a 200-day unattended run (the same shape as `EconomyReportTests.testPrintEconomyReport`: seed 2026, 250 citizens, `autoResolve` picking option 0) in which 47 of 250 citizens are hungry (~19%) while production is about 372/day against 250/day needed and about 164/day spoils. The test prints those lines and does not assert them, and this pass did not re-run it. The mechanism in `feedCitizens` matches that diagnosis: a citizen goes hungry when the home tile has no market inside `maxServiceDistance`, the market lacks a full ration, or the citizen cannot pay `foodPrice` (a short payment is refunded). `spoil` then removes `marketSpoilagePercent` of each farm and market store. Supply is in surplus on paper; distribution and affordability leave people hungry.
-- **One-tile buildings, placeholder art.** `WorldMap.buildingAt` stores one building id per tile. Sprites are flat UIColor blocks. `Assets.xcassets` on this branch contains AccentColor only (no app icon, no building images).
+- **One-tile buildings; the scene still draws placeholders.** `WorldMap.buildingAt` stores one building id per tile. `IslandScene` still draws procedural 64×32 terrain diamonds, a flat road fill, UIColor building blocks (26×23 pt, town hall 26×32), and dot walkers. Batch 2 art is in the catalog and not loaded yet: `Terrain/`, `Roads/`, `Decorations/`, `Walkers/`, and `UI/` under `PocketRepublic/Assets.xcassets/` (`provides-namespace` false). Names, the road bitmask, and walker frames are in `docs/art/ASSETS.md`. The UI look is `docs/art/UI_STYLE.md`. This branch still has no app icon and no building imagesets.
 - **Placeholder bundle id** `com.example.PocketRepublic` on Debug and Release.
 - **Legacy save left behind.** `pocket.republic.save.v1` is detected and never migrated.
 - **Inspect is a tile caption.** Tapping a placed building does not show workers, residents, food, funds, mode, or actions.
@@ -77,7 +77,7 @@ This split supersedes the shorter handoff line in the 11:17 AM Game Designer log
 
 ### Parallel work not on this branch
 
-PR #1 (`cursor/art-direction-and-icon-108e`) adds `docs/ART_DIRECTION.md`, a 1024×1024 app icon, and its own short `PROGRESS.md`. It is not contained here. Merging it will collide with this file.
+PR #1 (`cursor/art-direction-and-icon-108e`) adds `docs/ART_DIRECTION.md`, a 1024×1024 app icon, and its own short `PROGRESS.md`. It is not contained here. Merging it will collide with this file. PR #4 (`cursor/building-sprites-v1-5b58`) adds the v1 building imagesets and `docs/art/SPRITES.md`. It is also not contained here, and it edits this file, so the two progress logs will need folding whichever merges second.
 
 ## Owner playtest feedback (Oct 25, 2026)
 
@@ -95,7 +95,7 @@ Jordan tested on an iPhone. No art assets were in that build.
 Built on Game Logic's core API, after the core PR merges.
 
 - Ghost preview: green or red, reason from `IntentRejection`, service reach for market, clinic, school, and police.
-- Render footprints from the core sizes and `tilesCovered`, including the sprite base in [docs/DESIGN.md](docs/DESIGN.md). Move the island toward the Duo postures in that doc (unfolded map plus panel, folded bottom sheet, selection and camera kept).
+- Render footprints from the core sizes and `tilesCovered`, including the sprite base in [docs/DESIGN.md](docs/DESIGN.md). For batch 2, pick terrain variants with a deterministic hash of the tile index, draw `road_*` overlays from the bitmask in `docs/art/ASSETS.md`, use `nearest` filtering for walkers and flip the other two directions with `xScale`, and keep the hungry orange tint. Use `docs/art/UI_STYLE.md` for the HUD pill, decree cards, Gazette feed, citizen rows, and inspect panel. Move the island toward the Duo postures in the design doc (unfolded map plus panel, folded bottom sheet, selection and camera kept).
 - Inspect panel contents from the design doc, using fields the core already tracks.
 - Decree cards and the newspaper event feed from section 3: title, flavor, cost or Free, faction chips, plain-language effects, **Issue decree** / **Not now**, and stories grouped by kind, district, and day with a because-line, names, and **Show me**.
 - CI and device build: get `.github/workflows/unsigned-ipa.yml` green on `xcode-27`, update the README toolchain lines so they match the workflow, and replace bundle id `com.example.PocketRepublic` when signing needs a real id.
@@ -115,7 +115,8 @@ The core PR merges first.
 
 ### Visual And Grapchics
 
-- Building sprites sized from the footprint table in [docs/DESIGN.md](docs/DESIGN.md). The island still draws flat color blocks.
+- Batch 2 terrain, shore foam, road autotiles, decorations, walkers, the cart, and UI icons are in the catalog. Specs are `docs/art/ASSETS.md`, `docs/art/UI_STYLE.md`, `docs/art/road_autotile.json`, and `docs/art/decos.json`. The scene does not load them yet. Known gaps: no blend between terrain types, roads read faint on sand, the style-sheet mockup substitutes fonts for SF Pro Rounded, and the 3×2/2×3 building sprites (PR #4, not this branch) are still drawn on square bases.
+- Building sprites sized from the footprint table in [docs/DESIGN.md](docs/DESIGN.md) are PR #4, not this branch. The island still draws flat color blocks.
 - App icon. The catalog on this branch has none. PR #1 has a 1024×1024 icon and `docs/ART_DIRECTION.md` in flight.
 
 ### Later / backlog
@@ -123,6 +124,12 @@ The core PR merges first.
 - Player-customizable iPhone Duo layouts (choose what each panel shows, for example map, inspect, agenda, or stats). Owner: Ios Dev. Deferred by Jordan until performance and game feel are optimized.
 
 ## Log
+
+### 2026-10-25 11:32 AM EDT — Visual And Grapchics — `cursor/terrain-roads-walkers-ui-5b58`
+
+- **Changed:** Added 94 imagesets under `PocketRepublic/Assets.xcassets/` in `Terrain/` (31), `Roads/` (16), `Decorations/` (14), `Walkers/` (26), and `UI/` (7). Each folder sets `provides-namespace` to false, so names stay `tile_*`, `road_*`, `deco_*`, `walker_*`, `cart_0_*`, and `icon_*`. Added `docs/art/ASSETS.md`, `UI_STYLE.md`, `road_autotile.json`, `decos.json`, `terrain_preview.png`, `ui_style_sheet.png`, and `ui_style_sheet.html`. Generator scripts are in `tools/art/`. No Swift changes.
+- **Verified:** Every imageset PNG is 8-bit RGBA with an alpha channel (terrain diamonds are opaque inside the tile and transparent in the corners). Every `Contents.json` parses. The road bitmask in `docs/art/ASSETS.md` matches `IslandScene.point(x:y:)`: N=1 is (x, y−1) up-right, E=2 is (x+1, y) down-right, S=4 is (x, y+1) down-left, W=8 is (x−1, y) up-left. Road assets were not renamed. Largest file is `docs/art/terrain_preview.png` at about 1.1 MB; nothing approaches GitHub's 100 MB file limit. No Swift toolchain or iPhone here, so `swift test` and the device build were not run.
+- **Next:** Ios Dev wires the art. Pick terrain variants by a deterministic hash of the tile index, draw roads as overlays chosen by the bitmask, use `nearest` filtering for walkers and flip them with `xScale` for the other two directions, keep the hungry orange tint, and follow `docs/art/UI_STYLE.md` for the HUD pill, decree cards, Gazette event feed, citizen rows, and inspect panel. Game Logic's footprint-core PR still merges before the footprint renderer. Known gaps stay open: no blending between terrain types, faint roads on sand, mockup fonts substituted for SF Pro Rounded, and the 3×2/2×3 building sprites still on square bases (PR #4).
 
 ### 2026-10-25 11:25 AM EDT — Docs agent — `cursor/progress-log-d016` (PR #3)
 
