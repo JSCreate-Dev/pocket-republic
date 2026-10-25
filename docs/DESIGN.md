@@ -78,3 +78,74 @@ Only show what the core already tracks.
 - No screens that are only tables.
 - Nothing changes silently.
 - No modal popups mid-placement. Crises and choices go to the agenda panel.
+
+## 3. Decrees and events: how they read
+
+Playtest problem: decree buttons read like "Raise the civic wage: 0" and "Purge the graft registers: 260", each with a bare "Not now", and the event log is four identical "Citizen Hungry · days hungry" rows. Every field below already exists in the core (`DecreeSpec`, `AgendaEffect`, `GameEvent`, `CauseFactor`, citizen and district names), so this is presentation work only.
+
+### Decree card
+The card is laid out top to bottom like this.
+
+1. **Title**, in imperative voice, exactly as `DecreeSpec.name` gives it ("Purge the graft registers").
+2. **Flavor line**, one sentence in the republic's voice that says what it means in the world: "Auditors open every ledger in the Ministry. Some officials will not sleep tonight." Add a `flavor` string to `DecreeSpec`, so that's data and not code.
+3. **Cost**, shown as a coin icon and amount ("260"). When `cost == 0`, show **"Free"**. Never show ": 0". If the treasury can't afford it, grey out the cost in red with "Need 40 more".
+4. **Who it pleases and who it angers.** One chip per faction from `favorFactions`/`favorDeltas`, with an up or down arrow and a strength (▲ small 1–3, ▲▲ medium 4–6, ▲▲▲ large 7+), and pleased chips first: "Landless ▲▲ · Labourers ▲ · Officials ▼▼▼". Show the strength as arrows rather than raw numbers, so it stays readable and still matches the sim.
+5. **What it changes**, in plain words, only the lines that apply:
+   - Treasury: "−260 now"
+   - Taxes: "Income tax −3%" or "+3%"
+   - Wages: "Civic wage +1/day"
+   - Order: "Unrest falls across the island" (or "in Harbor" when it's scoped to a district)
+   - Trust: "Legitimacy up" or "down", "Corruption down"
+   - Food: "+140 food delivered to the market"
+   - Neglect: "Neglected district is restored"
+6. **Buttons:** a primary **"Issue decree"** and a quiet secondary **"Not now"**. "Not now" only closes the card. It isn't an option with a cost.
+
+Example: **Raise the civic wage**, Free. "Clerks, nurses and teachers get a little more in every pay packet." Officials ▲▲▲ · Merchants ▼▼. Civic wage +1/day, paid from the treasury every day after this.
+
+The decree list shows each decree as a compact row (title, cost or "Free", and its top pleased and angered faction), and tapping a row opens the full card. Crisis decisions (`PendingDecision`) use the same card layout, plus a "Why this happened" line built from its `causes` ("Harbor has gone 9 days without a market in range").
+
+### Events: newspaper style
+The event feed is the island's newspaper, so it reports stories, not rows.
+
+**Grouping.** Combine events with the same `kind` and the same district on the same day into one story, with a count.
+- 4 × `citizenHungry` in Harbor → **"4 families went hungry in Harbor"**
+- Show up to three names from `subjects` as the subhead ("Ana Reyes, Tomás Ortiz and 2 others"), and tapping the subhead lists them all.
+
+**Each story shows:**
+1. A **headline** in plain past tense with a number and a place: "4 families went hungry in Harbor".
+2. A **"because" line** taken from the top `CauseFactor`: "No market within reach for 9 days" or "Market ran out of food".
+3. **Names** of up to three subjects.
+4. A **trend tag** when it's repeating: "3rd day running" (from `daysHungry` or repeat counts).
+5. A **"Show me" tap** that pans the camera to `location` and highlights the building or district.
+
+**Ordering and weight.**
+- Group the feed by day under a masthead ("Day 14 · The Pocket Gazette").
+- Within a day, list it in this order: crises and decisions, then bad news, then good news, then routine.
+- Headline weight follows severity. Crises are bold with a colored bar, bad news is regular, and good news is lighter with a green tick.
+- Fold routine events (`dayAdvanced`, single hires) into one line at the bottom: "3 citizens found work · 1 new house built".
+
+**Headline templates** (per `EventKind`, singular and plural):
+
+| Kind | Headline |
+|---|---|
+| citizenHungry | "{n} families went hungry in {district}" |
+| foodShortage | "{market} ran out of food" |
+| citizenUnemployed | "{n} workers lost their jobs in {district}" |
+| citizenEmployed | "{n} citizens found work" |
+| citizenTurnedToCrime | "{name} turned to crime in {district}" |
+| districtNeglected | "{district} feels forgotten: no {service} for {days} days" |
+| districtProtest | "Crowds gather in {district}" |
+| buildingConstructed | "A new {building} opens in {district}" |
+| buildingAbandoned | "The {building} in {district} stands empty" |
+| migrationArrival / Departure | "{n} newcomers arrived" / "{n} citizens left the island" |
+| factionDemandRaised | "The {faction} demand action on {concern}" |
+| factionDemandIgnored | "The {faction} feel ignored" |
+| decreeIssued | "By decree: {decree title}" |
+| crisisRaised / Resolved | "Crisis in {district}: {kind}" / "{district} crisis resolved" |
+| treasuryEmpty | "The treasury is empty" |
+| electionCalled / Held | "An election is called" / "The republic has voted" |
+
+**Rules:**
+- Every negative story has a "because" line, so if a cause is missing the core should be fixed rather than the line dropped.
+- Never show the raw enum name or a bare number.
+- Write templates as data (a strings table), so they can be localized later.
