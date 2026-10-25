@@ -219,6 +219,7 @@ private extension IntentRejection {
         case .noPendingDecision, .decisionMismatch, .invalidOption, .noSuchAgendaItem:
             return "That decision is no longer available."
         case .crisisPendingBlocksBuilding: return "Resolve the crisis before building."
+        case .operatingModeNotOffered: return "That building has no operating mode."
         }
     }
 }
