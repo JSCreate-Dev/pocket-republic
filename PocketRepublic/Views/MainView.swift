@@ -2,36 +2,174 @@ import SwiftUI
 import PocketRepublicCore
 
 struct MainView: View {
-    @EnvironmentObject var game: Game
+    @EnvironmentObject private var game: Game
     @State private var tab = 0
+    @State private var confirmNewCity = false
+
     var body: some View {
         TabView(selection: $tab) {
-            dashboard.tabItem { Label("Island", systemImage: "leaf.fill") }.tag(0)
-            citizens.tabItem { Label("Citizens", systemImage: "person.3.fill") }.tag(1)
-            governance.tabItem { Label("Govern", systemImage: "building.columns.fill") }.tag(2)
-            news.tabItem { Label("News", systemImage: "newspaper.fill") }.tag(3)
-        }.tint(.mint)
-        .alert(game.state.pending == "revolution" ? "Revolution!" : "Corruption Scandal", isPresented: Binding(get: { game.state.pending != nil }, set: { _ in })) {
-            Button(game.state.pending == "revolution" ? "Negotiate ($600)" : "Investigate") { game.decide(0) }
-            Button(game.state.pending == "revolution" ? "Deploy security" : "Cover it up", role: .destructive) { game.decide(1) }
-        } message: { Text("A major political crisis requires your decision. The simulation is paused.") }
+            island.tabItem { Label("Island", systemImage: "map.fill") }.tag(0)
+            people.tabItem { Label("People", systemImage: "person.3.fill") }.tag(1)
+            govern.tabItem { Label("Govern", systemImage: "building.columns.fill") }.tag(2)
+            events.tabItem { Label("Events", systemImage: "newspaper.fill") }.tag(3)
+        }
+        .tint(.mint)
+        .alert("A crisis needs your decision", isPresented: Binding(
+            get: { game.state.pending != nil }, set: { _ in }
+        )) {
+            if let pending = game.state.pending {
+                ForEach(pending.options) { option in
+                    Button(option.label) {
+                        game.send(.resolveDecision(pending.id, option: option.id))
+                    }
+                }
+            }
+        } message: {
+            Text("The city will pause until this is resolved.")
+        }
+        .confirmationDialog("Start a new city?", isPresented: $confirmNewCity) {
+            Button("Start New City", role: .destructive) { game.startNewCity() }
+        } message: {
+            Text("This replaces the spatial city save. Your earlier prototype save stays untouched.")
+        }
     }
-    var dashboard: some View { NavigationStack { ScrollView {
-        VStack(alignment: .leading, spacing: 18) {
-            Text("ISLA VERDE").font(.largeTitle.bold()).foregroundStyle(.mint)
-            Text("Day \(game.state.day) • A republic in motion").foregroundStyle(.secondary)
-            IslandView().frame(height: 245).clipShape(RoundedRectangle(cornerRadius: 18))
-            HStack { metric("Citizens", "\(game.state.citizens.count)"); metric("Approval", "\(game.approval)%"); metric("Unrest", "\(game.state.unrest)%") }
-            HStack { metric("Treasury", "$\(game.state.treasury)"); metric("Food", "\(game.state.food)"); metric("Corruption", "\(game.state.corruption)%") }
-            Text("LATEST HEADLINE").font(.caption.bold()).foregroundStyle(.secondary)
-            Text(game.state.news.first ?? "Quiet day").padding().frame(maxWidth: .infinity, alignment: .leading).background(.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 12))
-            if let issue = game.saveIssue { Text(issue).foregroundStyle(.red).padding() }
-            Button { game.advance() } label: { Label("Advance One Day", systemImage: "forward.fill").frame(maxWidth: .infinity).padding() }.buttonStyle(.borderedProminent).disabled(game.state.pending != nil || game.saveIssue != nil)
-            Text("Offline catch-up: up to 3 days at 6 hours per simulated day. Major crises pause progression.").font(.caption).foregroundStyle(.secondary)
-        }.padding()
-    }.navigationTitle("Pocket Republic") } }
-    func metric(_ label: String, _ value: String) -> some View { VStack(spacing: 5) { Text(value).font(.headline).minimumScaleFactor(0.6).lineLimit(1); Text(label).font(.caption2).foregroundStyle(.secondary) }.frame(maxWidth: .infinity).padding(8).background(.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 10)) }
-    var citizens: some View { NavigationStack { List(game.state.citizens) { c in NavigationLink { VStack(alignment: .leading, spacing: 14) { Text(c.name).font(.largeTitle.bold()); Text(c.occupation); Text("Happiness: \(c.happiness) / 100"); Text("Government loyalty: \(c.loyalty) / 100"); Text("Wealth: \(c.wealth)"); Text("Ambition: \(c.ambition)"); Text("Influence: \(c.influence)"); if c.criminal { Label("Black market activity", systemImage: "exclamationmark.triangle").foregroundStyle(.orange) }; Spacer() }.padding().navigationTitle("Citizen") } label: { HStack { Image(systemName: c.criminal ? "person.crop.circle.badge.exclamationmark" : "person.crop.circle").foregroundStyle(.mint); VStack(alignment: .leading) { Text(c.name); Text(c.occupation).font(.caption).foregroundStyle(.secondary) }; Spacer(); Text("\(c.loyalty)%").foregroundStyle(.secondary) } } }.navigationTitle("Citizens") } }
-    var governance: some View { NavigationStack { Form { Section("Government policy") { Stepper("Tax rate: \(game.state.tax)%", value: $game.state.tax, in: 0...40, step: 5); Stepper("Public services: \(game.state.services)", value: $game.state.services, in: 0...100, step: 10); Stepper("Security budget: \(game.state.security)", value: $game.state.security, in: 0...100, step: 10); Button("Save Policies") { game.save() } }.disabled(game.saveIssue != nil); Section("Political conditions") { Text("Legitimacy: \(game.state.legitimacy)%"); Text("Unrest: \(game.state.unrest)%"); Text("Corruption: \(game.state.corruption)%") }; Section("Save") { if let issue = game.saveIssue { Text(issue).foregroundStyle(.red) }; Button("Restart Republic", role: .destructive) { game.reset() } } }.navigationTitle("Government") } }
-    var news: some View { NavigationStack { List(Array(game.state.news.enumerated()), id: \.offset) { entry in Text(entry.element).padding(.vertical, 5) }.navigationTitle("Island News") } }
+
+    private var island: some View {
+        NavigationStack {
+            GeometryReader { _ in
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Day \(game.snapshot.day) · \(game.snapshot.population) residents")
+                        .font(.subheadline).foregroundStyle(.secondary)
+                    IslandView()
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .clipShape(RoundedRectangle(cornerRadius: 16))
+                    Text("Drag to pan · pinch to zoom · choose a tool, then tap a tile")
+                        .font(.caption).foregroundStyle(.secondary)
+                    if let feedback = game.feedback {
+                        Text(feedback).font(.callout).foregroundStyle(.orange)
+                    }
+                    if let issue = game.saveIssue {
+                        Text(issue).font(.callout).foregroundStyle(.red)
+                    }
+                    HStack {
+                        metric("Treasury", "$\(game.snapshot.treasury)")
+                        metric("Food", "\(game.snapshot.foodInStores)")
+                        metric("Happiness", "\(game.snapshot.meanHappiness)%")
+                    }
+                    Button { game.advance() } label: {
+                        Label("Advance One Day", systemImage: "forward.fill")
+                            .frame(maxWidth: .infinity).padding(.vertical, 8)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(game.state.blocksAdvance || game.saveIssue != nil)
+                }
+                .padding(10)
+            }
+            .navigationTitle("Pocket Republic")
+        }
+    }
+
+    private func metric(_ title: String, _ value: String) -> some View {
+        VStack(spacing: 3) {
+            Text(value).font(.headline).lineLimit(1).minimumScaleFactor(0.7)
+            Text(title).font(.caption2).foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(8)
+        .background(.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
+    }
+
+    private var people: some View {
+        NavigationStack {
+            List(game.state.citizens.filter(\.alive)) { citizen in
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(citizen.name).font(.headline)
+                    Text("\(String(describing: citizen.occupation).capitalized) · Happiness \(citizen.happiness)% · $\(citizen.money)")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            }
+            .navigationTitle("Citizens")
+        }
+    }
+
+    private var govern: some View {
+        NavigationStack {
+            Form {
+                Section("Government") {
+                    Text("Legitimacy: \(game.snapshot.legitimacy)%")
+                    Text("Corruption: \(game.snapshot.corruption)%")
+                    Stepper("Income tax: \(game.state.policy.incomeTaxPercent)%", value: Binding(
+                        get: { Int(game.state.policy.incomeTaxPercent) },
+                        set: { newValue in
+                            var next = game.state.policy
+                            next.incomeTaxPercent = Int32(newValue)
+                            game.send(.setPolicy(next))
+                        }
+                    ), in: 0...60, step: 5)
+                }
+                .disabled(game.saveIssue != nil)
+
+                Section("Decisions") {
+                    ForEach(game.state.agenda) { item in
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text(item.kind.title).font(.headline)
+                            if let cause = item.causes.first {
+                                Text("\(cause.detail): \(cause.value)")
+                                    .font(.caption).foregroundStyle(.secondary)
+                            }
+                            ForEach(item.options) { option in
+                                Button(option.label) {
+                                    game.send(.resolveAgendaItem(item.id, option: option.id))
+                                }
+                            }
+                        }
+                    }
+                }
+                .disabled(game.saveIssue != nil)
+
+                Section("Save") {
+                    if game.hasPrototypeSave {
+                        Text("Your earlier prototype save remains on this device. This city uses a separate save.")
+                            .font(.caption)
+                    }
+                    if let issue = game.saveIssue { Text(issue).foregroundStyle(.red) }
+                    Button("Start New City", role: .destructive) { confirmNewCity = true }
+                }
+            }
+            .navigationTitle("Government")
+        }
+    }
+
+    private var events: some View {
+        NavigationStack {
+            List(Array(game.state.events.reversed())) { event in
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(event.kind.title).font(.headline)
+                    Text("Day \(event.day)" + event.causes.first.map { " · \($0.detail)" }.orEmpty)
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            }
+            .navigationTitle("Events")
+        }
+    }
+}
+
+private extension Optional where Wrapped == String {
+    var orEmpty: String { self ?? "" }
+}
+
+private extension AgendaKind {
+    var title: String {
+        switch self {
+        case .factionDemand: return "Faction demand"
+        case .advisoryTradeoff: return "Council advice"
+        case .decree: return "Decree"
+        case .buildingCommission: return "New building commission"
+        case .election: return "Election"
+        }
+    }
+}
+
+private extension EventKind {
+    var title: String { rawValue.replacingOccurrences(of: "([a-z])([A-Z])", with: "$1 $2", options: .regularExpression).capitalized }
 }

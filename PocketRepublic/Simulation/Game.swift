@@ -2,91 +2,223 @@ import Combine
 import Foundation
 import PocketRepublicCore
 
+/// The app boundary: intents go into the core, then a new read-only state goes to UI.
 @MainActor final class Game: ObservableObject {
-    @Published var state: Republic
+    @Published private(set) var state: RepublicState
     @Published private(set) var saveIssue: String?
+    @Published private(set) var feedback: String?
 
-    private let key = "pocket.republic.save.v1"
+    /// The old prototype's UserDefaults save is intentionally left untouched.
+    let hasPrototypeSave: Bool
+    private let saveURL: URL?
 
     init() {
-        let now = Date().timeIntervalSince1970
-        let storedObject = UserDefaults.standard.object(forKey: key)
-        let result: SaveDecodeResult
-        if let data = storedObject as? Data {
-            result = SaveCodec.decode(data)
-        } else if storedObject == nil {
-            result = .missing
+        hasPrototypeSave = UserDefaults.standard.object(forKey: "pocket.republic.save.v1") != nil
+        let url = try? Self.makeSaveURL()
+        saveURL = url
+
+        if let url, FileManager.default.fileExists(atPath: url.path) {
+            do {
+                let data = try Data(contentsOf: url)
+                let file = try JSONDecoder().decode(SpatialSave.self, from: data)
+                let loaded = file.state
+                guard file.formatVersion == 1,
+                      file.checksum != 0,
+                      file.checksum == loaded.stateHash(),
+                      Self.isValid(loaded) else {
+                    throw SaveError.invalidState
+                }
+                state = loaded
+                saveIssue = nil
+            } catch {
+                state = Self.freshState()
+                saveIssue = "The city save could not be read. It is preserved; choose Start New City in Govern to replace it."
+            }
         } else {
-            result = .corrupt
+            state = Self.freshState()
+            saveIssue = url == nil ? "City storage is unavailable on this device." : nil
         }
-
-        switch result {
-        case .missing:
-            state = Self.newRepublic(at: now)
-            saveIssue = nil
+        if let url, !FileManager.default.fileExists(atPath: url.path) {
             save()
-        case .loaded(let saved):
-            state = saved
-            saveIssue = nil
-            catchUp()
-        case .corrupt:
-            state = Self.newRepublic(at: now)
-            saveIssue = "The saved republic could not be read. Its data has been preserved. In Govern, tap Restart Republic to discard it."
-        case .unsupportedVersion(let version):
-            state = Self.newRepublic(at: now)
-            saveIssue = "Saved republic version \(version) is unsupported. Its data has been preserved. In Govern, tap Restart Republic to discard it."
         }
     }
 
-    var approval: Int { Engine.approval(of: state) }
+    var snapshot: WorldSnapshot { state.snapshot() }
 
-    func save() {
+    func send(_ intent: PlayerIntent) {
         guard saveIssue == nil else { return }
-        var candidate = state
-        candidate.lastSavedAtEpochSeconds = Date().timeIntervalSince1970
-        do {
-            let data = try SaveCodec.encode(candidate)
-            UserDefaults.standard.set(data, forKey: key)
-            state = candidate
-        } catch {
-            saveIssue = "The republic could not be saved. In Govern, tap Restart Republic to start a new save."
-        }
-    }
-
-    func catchUp() {
-        guard saveIssue == nil else { return }
-        let elapsed = Date().timeIntervalSince1970 - state.lastSavedAtEpochSeconds
-        guard let days = OfflineCatchUp.days(elapsedSeconds: elapsed) else {
-            saveIssue = "The saved republic has an invalid timestamp. Its data has been preserved. In Govern, tap Restart Republic to discard it."
-            return
-        }
-        for _ in 0..<days where state.pending == nil {
-            advance()
+        var next = state
+        switch SimulationEngine.apply(intent, to: &next) {
+        case .accepted:
+            state = next
+            feedback = nil
+            save()
+        case .rejected(let reason):
+            feedback = reason.message
         }
     }
 
     func advance() {
-        guard saveIssue == nil, state.pending == nil else { return }
-        state = Engine.advance(state)
+        guard saveIssue == nil else { return }
+        guard !state.blocksAdvance else {
+            feedback = "Resolve the crisis before advancing."
+            return
+        }
+        var next = state
+        SimulationEngine.advance(&next)
+        state = next
+        feedback = nil
         save()
     }
 
-    func decide(_ choice: Int) {
-        guard saveIssue == nil, state.pending != nil else { return }
-        state = Engine.decide(choice, in: state)
-        save()
+    func startNewCity() {
+        guard let saveURL else {
+            saveIssue = "City storage is unavailable on this device."
+            return
+        }
+        do {
+            if FileManager.default.fileExists(atPath: saveURL.path) {
+                try FileManager.default.removeItem(at: saveURL)
+            }
+            state = Self.freshState()
+            saveIssue = nil
+            feedback = nil
+            save()
+        } catch {
+            saveIssue = "Could not replace the city save: \(error.localizedDescription)"
+        }
     }
 
-    func reset() {
-        UserDefaults.standard.removeObject(forKey: key)
-        saveIssue = nil
-        state = Self.newRepublic(at: Date().timeIntervalSince1970)
-        save()
+    private func save() {
+        guard saveIssue == nil, let saveURL else { return }
+        var saved = state
+        saved.trimEvents(keepingLast: 500)
+        do {
+            let data = try JSONEncoder().encode(SpatialSave(
+                formatVersion: 1,
+                checksum: saved.stateHash(),
+                state: saved
+            ))
+            try data.write(to: saveURL, options: .atomic)
+            state = saved
+        } catch {
+            saveIssue = "City changes could not be saved: \(error.localizedDescription)"
+        }
     }
 
-    private static func newRepublic(at timestamp: Double) -> Republic {
-        var newState = Engine.makeInitialState(worldSeed: UInt64.random(in: UInt64.min...UInt64.max))
-        newState.lastSavedAtEpochSeconds = timestamp
-        return newState
+    private static func freshState() -> RepublicState {
+        WorldGenerator.generate(seed: UInt64.random(in: UInt64.min...UInt64.max))
+    }
+
+    private static func isValid(_ saved: RepublicState) -> Bool {
+        let map = saved.map
+        guard saved.schemaVersion == RepublicState.currentSchemaVersion,
+              map.width > 0, map.height > 0, map.width <= 256, map.height <= 256,
+              !saved.districts.isEmpty, saved.districts.count <= 256,
+              saved.factions.count == FactionKind.allCases.count,
+              saved.crisisKindCooldown.count == DecisionKind.allCases.count else { return false }
+        let count = Int(map.width) * Int(map.height)
+        guard map.terrain.count == count, map.districtAt.count == count,
+              map.road.count == count, map.buildingAt.count == count,
+              map.districtAt.allSatisfy({ Int($0) < saved.districts.count }) else { return false }
+
+        func validTile(_ tile: TileIndex) -> Bool {
+            tile.raw >= 0 && Int(tile.raw) < count
+        }
+        func validBuilding(_ id: BuildingID) -> Bool {
+            id.raw >= 0 && Int(id.raw) < saved.buildings.count
+        }
+        func validCitizen(_ id: CitizenID) -> Bool {
+            id.raw >= 0 && Int(id.raw) < saved.citizens.count
+        }
+        func validDistrict(_ id: DistrictID) -> Bool {
+            Int(id.raw) < saved.districts.count
+        }
+        func validLocation(_ location: EventLocation) -> Bool {
+            (location.tile.map(validTile) ?? true)
+                && (location.building.map(validBuilding) ?? true)
+                && (location.district.map(validDistrict) ?? true)
+        }
+
+        for (index, district) in saved.districts.enumerated() {
+            guard district.id.raw == UInt8(index), validTile(district.centroid),
+                  district.servingMarket.map(validBuilding) ?? true else { return false }
+        }
+        for (index, faction) in saved.factions.enumerated() {
+            guard faction.kind.rawValue == UInt8(index) else { return false }
+        }
+        for (index, building) in saved.buildings.enumerated() {
+            guard building.id.raw == Int32(index), validTile(building.tile),
+                  validDistrict(building.district),
+                  building.workers.allSatisfy(validCitizen),
+                  building.residents.allSatisfy(validCitizen) else { return false }
+        }
+        for (tile, raw) in map.buildingAt.enumerated() {
+            guard raw >= -1 else { return false }
+            if raw >= 0 {
+                guard validBuilding(BuildingID(raw)),
+                      saved.buildings[Int(raw)].tile.raw == Int32(tile) else { return false }
+            }
+        }
+        for (index, citizen) in saved.citizens.enumerated() {
+            guard citizen.id.raw == Int32(index), validDistrict(citizen.district) else { return false }
+            for id in [citizen.home, citizen.work].compactMap({ $0 }) {
+                guard validBuilding(id) else { return false }
+            }
+        }
+        if !saved.fields.dirty {
+            guard saved.fields.fields.count == ServiceKind.allCases.count,
+                  saved.fields.fields.allSatisfy({ $0.count == count }),
+                  saved.fields.component.count == count,
+                  saved.fields.nearestMarket.count == count else { return false }
+            for raw in saved.fields.nearestMarket where raw >= 0 {
+                guard validBuilding(BuildingID(raw)) else { return false }
+            }
+        }
+        if let pending = saved.pending {
+            guard validLocation(pending.location), !pending.options.isEmpty else { return false }
+        }
+        for item in saved.agenda {
+            guard validLocation(item.location), !item.options.isEmpty else { return false }
+        }
+        for event in saved.events where !validLocation(event.location) { return false }
+        return true
+    }
+
+    private static func makeSaveURL() throws -> URL {
+        let base = try FileManager.default.url(
+            for: .applicationSupportDirectory,
+            in: .userDomainMask,
+            appropriateFor: nil,
+            create: true
+        )
+        let folder = base.appendingPathComponent("PocketRepublic", isDirectory: true)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        return folder.appendingPathComponent("spatial-v1.json")
+    }
+
+    private enum SaveError: Error { case invalidState }
+}
+
+private struct SpatialSave: Codable {
+    let formatVersion: Int
+    let checksum: UInt64
+    let state: RepublicState
+}
+
+private extension IntentRejection {
+    var message: String {
+        switch self {
+        case .outOfBounds: return "That tile is outside the island."
+        case .notBuildable: return "You cannot build on this terrain."
+        case .occupied: return "That tile is occupied."
+        case .notConnectedToRoad: return "Buildings need an adjacent road."
+        case .insufficientTreasury: return "The treasury cannot afford that."
+        case .noSuchBuilding: return "That building no longer exists."
+        case .cannotDemolishTownHall: return "The town hall must remain."
+        case .noPendingDecision, .decisionMismatch, .invalidOption, .noSuchAgendaItem:
+            return "That decision is no longer available."
+        case .crisisPendingBlocksBuilding: return "Resolve the crisis before building."
+        }
     }
 }

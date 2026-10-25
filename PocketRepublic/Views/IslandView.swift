@@ -1,16 +1,86 @@
 import SwiftUI
+import SpriteKit
+import PocketRepublicCore
 
 struct IslandView: View {
-    let tiles: [(Int, Int, String)] = [(0,0,"🏛️"), (1,0,"🏠"), (2,0,"🌴"), (3,0,"🏠"), (0,1,"🌾"), (1,1,"🏪"), (2,1,"🏠"), (3,1,"🌴"), (0,2,"🌴"), (1,2,"🏥"), (2,2,"🌾"), (3,2,"⚓")]
-    var body: some View { GeometryReader { geo in ZStack {
-        LinearGradient(colors: [.cyan.opacity(0.6), .blue.opacity(0.65)], startPoint: .top, endPoint: .bottom)
-        ForEach(0..<4, id: \.self) { x in ForEach(0..<3, id: \.self) { y in
-            let cx = geo.size.width/2 + CGFloat(x-y)*43 - 22
-            let cy = CGFloat(42 + (x+y)*25)
-            let diamond = Path { p in p.move(to: CGPoint(x:cx,y:cy)); p.addLine(to: CGPoint(x:cx+43,y:cy+24)); p.addLine(to: CGPoint(x:cx,y:cy+48)); p.addLine(to: CGPoint(x:cx-43,y:cy+24)); p.closeSubpath() }
-            diamond.fill(Color(red: 0.26 + Double((x+y)%2)*0.05, green: 0.62, blue: 0.35))
-            diamond.stroke(.green.opacity(0.6), lineWidth: 1)
-        } }
-        ForEach(tiles.indices, id: \.self) { i in let t = tiles[i]; Text(t.2).font(.system(size: 27)).position(x:geo.size.width/2 + CGFloat(t.0-t.1)*43-22, y: CGFloat(38+(t.0+t.1)*25)) }
-    } }.accessibilityLabel("Stylized isometric island with farms, homes, clinic, town hall and docks") }
+    @EnvironmentObject private var game: Game
+    @State private var scene = IslandScene(size: CGSize(width: 400, height: 470))
+    @State private var tool: CityTool = .inspect
+    @State private var selectedTile: TileIndex?
+
+    var body: some View {
+        VStack(spacing: 0) {
+            SpriteView(scene: scene)
+                .background(Color(red: 0.05, green: 0.22, blue: 0.37))
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 7) {
+                    ForEach(CityTool.allCases) { option in
+                        Button(option.label) {
+                            tool = option
+                            configureTapHandler()
+                        }
+                        .buttonStyle(.bordered)
+                        .tint(tool == option ? .mint : .secondary)
+                    }
+                }
+                .padding(8)
+            }
+            .background(.black.opacity(0.35))
+            if let selectedTile {
+                let x = game.state.map.x(of: selectedTile)
+                let y = game.state.map.y(of: selectedTile)
+                Text("Tile \(x), \(y) · \(terrainLabel(at: selectedTile))")
+                    .font(.caption).frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 10).padding(.bottom, 5)
+                    .background(.black.opacity(0.35))
+            }
+        }
+        .onAppear {
+            scene.scaleMode = .resizeFill
+            scene.render(game.state)
+            configureTapHandler()
+        }
+        .onReceive(game.$state) { state in scene.render(state) }
+    }
+
+    private func terrainLabel(at tile: TileIndex) -> String {
+        let map = game.state.map
+        guard Int(tile.raw) >= 0 && Int(tile.raw) < map.tileCount else { return "Outside island" }
+        if map.isRoad(at: tile) { return "Road" }
+        if let id = map.building(at: tile), Int(id.raw) < game.state.buildings.count {
+            return String(describing: game.state.buildings[Int(id.raw)].kind).capitalized
+        }
+        return String(describing: map.terrain(at: tile)).capitalized
+    }
+
+    private func configureTapHandler() {
+        let activeTool = tool
+        scene.onTileTap = { tile in
+            Task { @MainActor in
+                selectedTile = tile
+                if let intent = activeTool.intent(at: tile) { game.send(intent) }
+            }
+        }
+    }
+}
+
+private enum CityTool: String, CaseIterable, Identifiable {
+    case inspect, road, house, farm, market, clinic, school, police, workshop, dock
+    var id: String { rawValue }
+    var label: String { rawValue.capitalized }
+
+    func intent(at tile: TileIndex) -> PlayerIntent? {
+        switch self {
+        case .inspect: return nil
+        case .road: return .buildRoad(at: tile)
+        case .house: return .placeBuilding(.house, at: tile)
+        case .farm: return .placeBuilding(.farm, at: tile)
+        case .market: return .placeBuilding(.market, at: tile)
+        case .clinic: return .placeBuilding(.clinic, at: tile)
+        case .school: return .placeBuilding(.school, at: tile)
+        case .police: return .placeBuilding(.police, at: tile)
+        case .workshop: return .placeBuilding(.workshop, at: tile)
+        case .dock: return .placeBuilding(.dock, at: tile)
+        }
+    }
 }
