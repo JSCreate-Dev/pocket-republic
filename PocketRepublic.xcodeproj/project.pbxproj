@@ -1,0 +1,64 @@
+// !$*UTF8*$!
+{
+ archiveVersion = 1;
+ classes = {};
+ objectVersion = 56;
+ objects = {
+/* Begin PBXBuildFile section */
+  A00000000000000000000003 = {isa = PBXBuildFile; fileRef = B00000000000000000000003; };
+  A00000000000000000000004 = {isa = PBXBuildFile; fileRef = B00000000000000000000004; };
+  A00000000000000000000005 = {isa = PBXBuildFile; fileRef = B00000000000000000000005; };
+  A00000000000000000000006 = {isa = PBXBuildFile; fileRef = B00000000000000000000006; };
+  A00000000000000000000007 = {isa = PBXBuildFile; fileRef = B00000000000000000000007; };
+  A00000000000000000000008 = {isa = PBXBuildFile; productRef = B00000000000000000000009; };
+/* End PBXBuildFile section */
+/* Begin PBXFileReference section */
+  B00000000000000000000003 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Game.swift; sourceTree = "<group>"; };
+  B00000000000000000000004 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PocketRepublicApp.swift; sourceTree = "<group>"; };
+  B00000000000000000000005 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainView.swift; sourceTree = "<group>"; };
+  B00000000000000000000006 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IslandView.swift; sourceTree = "<group>"; };
+  B00000000000000000000007 = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+  B000000000000000000000000 = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = PocketRepublic.app; sourceTree = BUILT_PRODUCTS_DIR; };
+/* End PBXFileReference section */
+/* Begin PBXFrameworksBuildPhase section */
+  C00000000000000000000001 = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (A00000000000000000000008,); runOnlyForDeploymentPostprocessing = 0; };
+/* End PBXFrameworksBuildPhase section */
+/* Begin PBXGroup section */
+  D00000000000000000000000 = {isa = PBXGroup; children = (D00000000000000000000001, D00000000000000000000006,); sourceTree = "<group>"; };
+  D00000000000000000000001 = {isa = PBXGroup; children = (D00000000000000000000002, D00000000000000000000004, D00000000000000000000005, B00000000000000000000007,); path = PocketRepublic; sourceTree = "<group>"; };
+  D00000000000000000000002 = {isa = PBXGroup; children = (B00000000000000000000004,); path = App; sourceTree = "<group>"; };
+  D00000000000000000000004 = {isa = PBXGroup; children = (B00000000000000000000003,); path = Simulation; sourceTree = "<group>"; };
+  D00000000000000000000005 = {isa = PBXGroup; children = (B00000000000000000000005, B00000000000000000000006,); path = Views; sourceTree = "<group>"; };
+  D00000000000000000000006 = {isa = PBXGroup; children = (B000000000000000000000000,); name = Products; sourceTree = "<group>"; };
+/* End PBXGroup section */
+/* Begin PBXNativeTarget section */
+  E00000000000000000000000 = {isa = PBXNativeTarget; buildConfigurationList = F00000000000000000000001; buildPhases = (C00000000000000000000002, C00000000000000000000001, C00000000000000000000003,); buildRules = (); dependencies = (); name = PocketRepublic; productName = PocketRepublic; productReference = B000000000000000000000000; productType = "com.apple.product-type.application"; packageProductDependencies = (B00000000000000000000009,); };
+/* End PBXNativeTarget section */
+/* Begin PBXProject section */
+  E00000000000000000000001 = {isa = PBXProject; attributes = {BuildIndependentTargetsInParallel = 1; LastUpgradeCheck = 1500; TargetAttributes = {E00000000000000000000000 = {CreatedOnToolsVersion = 15.0; ProvisioningStyle = Automatic; }; }; }; buildConfigurationList = F00000000000000000000000; compatibilityVersion = "Xcode 14.0"; developmentRegion = en; hasScannedForEncodings = 0; knownRegions = (en, Base,); mainGroup = D00000000000000000000000; productRefGroup = D00000000000000000000006; projectDirPath = ""; projectRoot = ""; packageReferences = (B00000000000000000000008,); targets = (E00000000000000000000000,); };
+/* End PBXProject section */
+/* Begin PBXResourcesBuildPhase section */
+  C00000000000000000000003 = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (A00000000000000000000007,); runOnlyForDeploymentPostprocessing = 0; };
+/* End PBXResourcesBuildPhase section */
+/* Begin PBXSourcesBuildPhase section */
+  C00000000000000000000002 = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (A00000000000000000000003, A00000000000000000000004, A00000000000000000000005, A00000000000000000000006,); runOnlyForDeploymentPostprocessing = 0; };
+/* End PBXSourcesBuildPhase section */
+/* Begin XCBuildConfiguration section */
+  F00000000000000000000002 = {isa = XCBuildConfiguration; buildSettings = {CLANG_ENABLE_MODULES = YES; IPHONEOS_DEPLOYMENT_TARGET = 17.0; SDKROOT = iphoneos; SWIFT_VERSION = 5.0; }; name = Debug; };
+  F00000000000000000000003 = {isa = XCBuildConfiguration; buildSettings = {CLANG_ENABLE_MODULES = YES; IPHONEOS_DEPLOYMENT_TARGET = 17.0; SDKROOT = iphoneos; SWIFT_VERSION = 5.0; }; name = Release; };
+  F00000000000000000000004 = {isa = XCBuildConfiguration; buildSettings = {ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES; CODE_SIGN_STYLE = Automatic; CURRENT_PROJECT_VERSION = 1; GENERATE_INFOPLIST_FILE = YES; INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES; INFOPLIST_KEY_UILaunchScreen_Generation = YES; IPHONEOS_DEPLOYMENT_TARGET = 17.0; MARKETING_VERSION = 0.1; PRODUCT_BUNDLE_IDENTIFIER = com.example.PocketRepublic; PRODUCT_NAME = "$(TARGET_NAME)"; SUPPORTED_PLATFORMS = "iphoneos iphonesimulator"; SWIFT_VERSION = 5.0; TARGETED_DEVICE_FAMILY = "1,2"; }; name = Debug; };
+  F00000000000000000000005 = {isa = XCBuildConfiguration; buildSettings = {ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES; CODE_SIGN_STYLE = Automatic; CURRENT_PROJECT_VERSION = 1; GENERATE_INFOPLIST_FILE = YES; INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES; INFOPLIST_KEY_UILaunchScreen_Generation = YES; IPHONEOS_DEPLOYMENT_TARGET = 17.0; MARKETING_VERSION = 0.1; PRODUCT_BUNDLE_IDENTIFIER = com.example.PocketRepublic; PRODUCT_NAME = "$(TARGET_NAME)"; SUPPORTED_PLATFORMS = "iphoneos iphonesimulator"; SWIFT_VERSION = 5.0; TARGETED_DEVICE_FAMILY = "1,2"; }; name = Release; };
+/* End XCBuildConfiguration section */
+/* Begin XCConfigurationList section */
+  F00000000000000000000000 = {isa = XCConfigurationList; buildConfigurations = (F00000000000000000000002, F00000000000000000000003,); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+  F00000000000000000000001 = {isa = XCConfigurationList; buildConfigurations = (F00000000000000000000004, F00000000000000000000005,); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+/* End XCConfigurationList section */
+/* Begin XCLocalSwiftPackageReference section */
+  B00000000000000000000008 = {isa = XCLocalSwiftPackageReference; relativePath = PocketRepublicCore; };
+/* End XCLocalSwiftPackageReference section */
+/* Begin XCSwiftPackageProductDependency section */
+  B00000000000000000000009 = {isa = XCSwiftPackageProductDependency; package = B00000000000000000000008; productName = PocketRepublicCore; };
+/* End XCSwiftPackageProductDependency section */
+ };
+ rootObject = E00000000000000000000001;
+}

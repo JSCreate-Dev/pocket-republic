@@ -1,0 +1,58 @@
+name: Build unsigned iOS IPA
+
+on:
+  push:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: macos-15
+    timeout-minutes: 30
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_16.4.app/Contents/Developer
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Test deterministic core
+        run: swift test --package-path PocketRepublicCore
+
+      - name: Build iOS device app without signing
+        run: |
+          set -euo pipefail
+          xcodebuild -version
+          xcodebuild \
+            -project PocketRepublic.xcodeproj \
+            -scheme PocketRepublic \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath "$RUNNER_TEMP/PocketRepublicDerivedData" \
+            CODE_SIGNING_ALLOWED=NO \
+            build
+
+      - name: Package unsigned IPA
+        run: |
+          set -euo pipefail
+          app="$RUNNER_TEMP/PocketRepublicDerivedData/Build/Products/Release-iphoneos/PocketRepublic.app"
+          test -d "$app"
+          mkdir -p "$RUNNER_TEMP/PocketRepublicPackage/Payload"
+          ditto "$app" "$RUNNER_TEMP/PocketRepublicPackage/Payload/PocketRepublic.app"
+          (
+            cd "$RUNNER_TEMP/PocketRepublicPackage"
+            /usr/bin/zip -qry "$GITHUB_WORKSPACE/PocketRepublic-unsigned.ipa" Payload
+          )
+          unzip -tq "$GITHUB_WORKSPACE/PocketRepublic-unsigned.ipa"
+          unzip -Z -1 "$GITHUB_WORKSPACE/PocketRepublic-unsigned.ipa" | grep '^Payload/PocketRepublic.app/Info.plist$'
+          shasum -a 256 "$GITHUB_WORKSPACE/PocketRepublic-unsigned.ipa" > "$GITHUB_WORKSPACE/PocketRepublic-unsigned.ipa.sha256"
+
+      - name: Upload unsigned IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: PocketRepublic-unsigned-ipa
+          path: |
+            PocketRepublic-unsigned.ipa
+            PocketRepublic-unsigned.ipa.sha256
+          if-no-files-found: error
