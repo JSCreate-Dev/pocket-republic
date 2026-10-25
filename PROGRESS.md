@@ -12,7 +12,7 @@ Jordan wants Pocket Republic to feel like a lively, living world with a real gam
 
 ## Current state
 
-Code snapshot: main `3db7d17` on 25 October 2026, after PR #17 drew daily-routine walkers and batch 2 ground art. PR #10, the diorama HUD, decree cards, and the gazette, is open and its commits are not in this tree. PR #13's walker files did not reach main through the hunger-fix merge; PR #15 re-landed the core routine, and PR #17 connected it to the scene.
+Code snapshot: main `3c0294b` on 25 October 2026, after PR #17 drew daily-routine walkers and batch 2 ground art, and PR #18 changed the closed-Duo control rail: an inline navigation title, compact Cash and Next Day labels, and a transparent idle rail on tall portrait windows. PR #10, the diorama HUD, decree cards, and the gazette, is open and its commits are not in this tree. PR #13's walker files did not reach main through the hunger-fix merge; PR #15 re-landed the core routine, and PR #17 connected it to the scene.
 
 `PocketRepublicCore` contains **71** `func test` methods. The **Build iOS IPA** run for `3db7d17` executed 71 tests with 0 failures, then built the unsigned `iphoneos` app successfully with Xcode 27.1 ([run 40218820097](https://github.com/JSCreate-Dev/pocket-republic/actions/runs/40218820097)). This confirms CI compilation and packaging, not an install or run on an iPhone. The local Linux VM has no `swift` or `xcodebuild`; `cd PocketRepublicCore && swift test` exits 127 there. The core README's release timings (about 0.52 ms/tick at 1000 citizens) were not re-measured.
 
@@ -58,7 +58,7 @@ PR #1 added [docs/ART_DIRECTION.md](docs/ART_DIRECTION.md) and the 1024×1024 ap
 
 ### Duo layout and saves
 
-`CityDisplayLayout` uses iOS 27.1 `reservedRegions` for a vertical book fold (controls on the trailing pane) and a horizontal laptop fold (controls in the lower pane), plus portrait, landscape, and wide flat rails. Pre-27.1 devices skip the reserved-region branches. The design's stronger split, unfolded map on one pane and the panel on the other, folded bottom sheet, camera and selection kept across the fold, is what PR #10 started. It is not on main. A player-facing layout picker is deferred until game feel is optimized.
+`CityDisplayLayout` uses iOS 27.1 `reservedRegions` for a vertical book fold (controls on the trailing pane) and a horizontal laptop fold (controls in the lower pane), plus portrait, landscape, and wide flat rails. On a tall closed portrait window, the control rail now leaves its unused middle transparent, the navigation title is inline, and Cash and Next Day fit the narrow width. Compact-height windows still scroll the rail. Pre-27.1 devices skip the reserved-region branches. The design's stronger split, unfolded map on one pane and the panel on the other, folded bottom sheet, camera and selection kept across the fold, is what PR #10 started. It is not on main. A player-facing layout picker is deferred until game feel is optimized.
 
 A valid city is `Application Support/PocketRepublic/spatial-v1.json` (envelope `formatVersion` 1, checksum `stateHash()`, `RepublicState.schemaVersion` 2), written atomically. A corrupt or unsupported file is kept and blocks play until **Start New City**. The app reads the `UserDefaults` key `pocket.republic.save.v1` only to detect the old prototype. It never decodes or migrates it. A new city draws `worldSeed` once with `UInt64.random` at the app boundary (`Game.freshState`). After that, `worldSeed` and `rng` live in the saved state.
 
