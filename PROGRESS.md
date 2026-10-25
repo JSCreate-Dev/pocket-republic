@@ -122,6 +122,12 @@ The core PR merges first.
 
 ## Log
 
+### 2026-10-25 11:36 AM EDT — Visual And Grapchics — `cursor/building-sprites-v1-5b58` (PR #4)
+
+- **Changed:** Merged `origin/main` at `3b88a5c` (PR #1) with a merge commit. Kept every log entry from both sides, newest first, without duplicating the shared older entries. Moved the Building sprites section from `docs/art/SPRITES.md` into [docs/ART_DIRECTION.md](docs/ART_DIRECTION.md) and deleted `docs/art/SPRITES.md`. The art-direction status line now says v1 sprites are in. Current state matches this tree: icon and art direction from main, plus the nine building imagesets. No Swift edits.
+- **Verified:** `docs/ART_DIRECTION.md` still has main's feel, style, palette, building language, citizens, UI, and app-icon sections. The only status-line edit is that v1 sprites are in. No remaining references to `docs/art/SPRITES.md` outside this log. No Swift toolchain, Xcode, or iPhone here, so `swift test`, `actool`, and the device build were not run.
+- **Next:** Ios Dev loads `SKTexture(imageNamed: "building_\(kind)")`, sets `anchorPoint` to `(0.5, 0)`, sizes from `docs/art/sprites.json`, and positions the sprite at the footprint's front (south) corner, after Game Logic's footprint-core PR. A v2 pass redraws the 3×2 and 2×3 sprites. PR #6 stays a separate art batch.
+
 ### 2026-10-25 11:34 AM EDT — Ios Dev — `cursor/ci-ipa-bundle-id-71ac` (PR #5)
 
 - **Changed:** No product code. Recorded the post-merge CI result in this log.
@@ -133,6 +139,12 @@ The core PR merges first.
 - **Changed:** Tap-to-inspect. `BuildingInspectPanel` is a self-contained view in the island controls column (not a bottom sheet). Selection highlights every tile the occupancy map assigns to the building. The model is `BuildingInspection`, ordered status, then staffing, then numbers, from fields the core already tracks. The only core command added is `PlayerIntent.setOperatingMode`, because nothing else could change `OperatingMode` after the placement commission. Footprints, hunger, and walker routing were not touched.
 - **Verified:** `swift test` in `PocketRepublicCore` on Swift 6.2 (Linux, debug): 51 tests, 0 failures. No iOS SDK here, so the panel, highlight, and haptic were not run on a simulator or a phone. No screenshot.
 - **Next:** Game Logic's footprint core still comes before ghost preview and footprint rendering. Occupancy reads go through `BuildingOccupancy`, so their `buildingAt` can replace the array in that one type. A later layout PR can host `BuildingInspectPanel` in the unfolded side pane and the folded bottom sheet.
+
+### 2026-10-25 11:29 AM EDT — Visual And Grapchics — `cursor/building-sprites-v1-5b58` (PR #4)
+
+- **Changed:** Merged `origin/main` at `b960f52` (PRs #2 and #3) with a merge commit. Kept this file from main and added this entry. Added nine building imagesets under `PocketRepublic/Assets.xcassets/Buildings/` (`provides-namespace` false; names `building_townHall`, `building_house`, `building_farm`, `building_market`, `building_clinic`, `building_school`, `building_police`, `building_workshop`, `building_dock`), plus `docs/art/sprites.json`. The Building sprites section stays in `docs/art/SPRITES.md` because `docs/ART_DIRECTION.md` is still only on open PR #1. No change to `IslandScene.swift` or the simulation.
+- **Verified:** Every PNG is 8-bit RGBA with transparent pixels, and every `Contents.json` is valid JSON. Each 1x width is (W+H)×32 and matches `sprites.json`. Clinic, dock, market, and school @2x/@3x heights are one pixel off the 1x height; widths are exact. No Swift toolchain or iPhone here, so `swift test` and the device build were not run. This pull request does not change Swift.
+- **Next:** Game Logic's footprint-core PR still merges first. Ios Dev then loads `SKTexture(imageNamed: "building_\(kind)")`, sets `anchorPoint` to `(0.5, 0)`, sizes from `docs/art/sprites.json`, and positions the sprite at the footprint's front (south) corner. A v2 pass redraws the 3×2 and 2×3 sprites, which sit on square bases. PR #1 still needs its `PROGRESS.md` folded in when it merges.
 
 ### 2026-10-25 11:28 AM EDT — Visual And Grapchics — `cursor/art-direction-and-icon-108e` (PR #1)
 
