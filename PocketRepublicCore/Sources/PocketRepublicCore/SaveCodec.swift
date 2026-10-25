@@ -18,7 +18,12 @@ public enum SaveCodec {
             let probe = try JSONDecoder().decode(SchemaProbe.self, from: data)
             let version = probe.schemaVersion ?? 1
             guard version == Republic.currentSchemaVersion else { return .unsupportedVersion(version) }
-            return .loaded(try JSONDecoder().decode(Republic.self, from: data))
+            let republic = try JSONDecoder().decode(Republic.self, from: data)
+            guard republic.lastSavedAtEpochSeconds.isFinite,
+                  republic.pending == nil || republic.pending == "revolution" || republic.pending == "scandal" else {
+                return .corrupt
+            }
+            return .loaded(republic)
         } catch {
             return .corrupt
         }

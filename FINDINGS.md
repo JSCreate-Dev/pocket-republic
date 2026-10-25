@@ -3,11 +3,12 @@
 - Extracted the deterministic day and decision rules into the local `PocketRepublicCore` Swift package. It contains `CitizenID`, `Citizen`, `Republic`, `SeededRNG`, `Engine`, and `SaveCodec` without SwiftUI, Date, or UserDefaults use.
 - Stored a separate immutable `worldSeed` and advancing `rngState` in `Republic`. Initial citizen IDs are stable integers. The engine saves its RNG state after each day, and its tests cover replay, save/resume, pending-crisis pauses, and the same-day corruption ordering case.
 - Moved wall-clock catch-up and `UserDefaults` access to the app `Game` adapter. Saves have schema version 2. Missing saves create a new republic; corrupt or older saves are preserved and block changes until an explicit restart. No automatic overwrite occurs on a decode failure.
-- Added GitHub Actions macOS CI for core tests and an unsigned iOS device IPA. This has not been run because GitHub authentication and a repository destination are unavailable in this bot's browser.
+- Added GitHub Actions macOS CI for core tests and an unsigned iOS device IPA. This has not run because a repository destination is still unspecified and GitHub access is unavailable to this thread. The browser remains at Google sign-in; automatic approval review rejected sending a live GitHub token into an unsandboxed terminal.
+- After simulation review, clamped offline elapsed time before `Int` conversion, rejected unknown saved crises and invalid choices, and stopped already-criminal citizens from generating repeated discovery events. The pure catch-up conversion has extreme-value tests.
 
 ## P1 backlog
 
-Households, relationships, businesses, prices, employment, migration, factions, election cycle, policing, courts, persistent event causality, SpriteKit renderer, widget, and full save migration/recovery remain future work.
+Households, relationships, businesses, prices, employment, migration, factions, election cycle, policing, courts, persistent event causality, SpriteKit renderer, widget, and full save migration/recovery remain future work. Food production is fixed below consumption in v0.1, so food depletes even with policy changes; redesigning that economy remains backlog rather than an unreviewed P0 tweak.
 
 ## Verification limits
 

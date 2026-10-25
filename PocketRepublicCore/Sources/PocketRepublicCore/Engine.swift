@@ -45,7 +45,7 @@ public enum Engine {
             state.citizens[index].happiness = clamp(state.citizens[index].happiness + drift)
             state.citizens[index].loyalty = clamp(state.citizens[index].loyalty + drift / 2 - (corruptionAtStart > 50 ? 2 : 0))
             state.citizens[index].wealth = max(0, state.citizens[index].wealth + rng.nextInt(upperBound: 7) - state.tax / 10 - (hungry ? 4 : 0))
-            if state.citizens[index].wealth < 10 && state.citizens[index].ambition > 65 && rng.nextInt(upperBound: 100) < 12 {
+            if !state.citizens[index].criminal && state.citizens[index].wealth < 10 && state.citizens[index].ambition > 65 && rng.nextInt(upperBound: 100) < 12 {
                 state.citizens[index].criminal = true
                 newCorruption += 2
                 let name = state.citizens[index].name
@@ -78,6 +78,7 @@ public enum Engine {
     public static func decide(_ choice: Int, in oldState: Republic) -> Republic {
         guard let event = oldState.pending else { return oldState }
         guard event == "revolution" || event == "scandal" else { return oldState }
+        guard choice == 0 || choice == 1 else { return oldState }
         var state = oldState
         if event == "revolution" {
             if choice == 0 {

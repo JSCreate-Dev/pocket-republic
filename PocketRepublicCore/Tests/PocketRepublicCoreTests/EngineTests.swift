@@ -60,6 +60,22 @@ final class EngineTests: XCTestCase {
         state.pending = "scandal"
         XCTAssertEqual(try encoded(Engine.advance(state)), try encoded(state))
         XCTAssertEqual(Engine.decide(0, in: state).rngState, state.rngState)
+        XCTAssertEqual(try encoded(Engine.decide(99, in: state)), try encoded(state))
+    }
+
+    func testAlreadyCriminalCitizenDoesNotRepeatCrime() {
+        let citizen = Citizen(id: CitizenID(1), name: "First", occupation: "Worker", ambition: 90, loyalty: 80, wealth: 0, happiness: 50, influence: 0, criminal: true)
+        let start = Republic(worldSeed: 123, food: 1000, tax: 0, services: 0, security: 50, corruption: 50, citizens: [citizen])
+        let next = Engine.advance(start)
+        XCTAssertEqual(next.corruption, 49)
+        XCTAssertFalse(next.news.contains { $0.contains("black-market trading") })
+    }
+
+    func testCatchUpClampsBeforeIntegerConversion() {
+        XCTAssertEqual(OfflineCatchUp.days(elapsedSeconds: -Double.greatestFiniteMagnitude), 0)
+        XCTAssertEqual(OfflineCatchUp.days(elapsedSeconds: Double.greatestFiniteMagnitude), 3)
+        XCTAssertEqual(OfflineCatchUp.days(elapsedSeconds: 54000), 2)
+        XCTAssertNil(OfflineCatchUp.days(elapsedSeconds: .nan))
     }
 
     func testSaveCodecSeparatesMissingCorruptAndUnsupported() throws {
@@ -70,6 +86,10 @@ final class EngineTests: XCTestCase {
         var future = Engine.makeInitialState(worldSeed: 1)
         future.schemaVersion = 99
         if case .unsupportedVersion(99) = SaveCodec.decode(try SaveCodec.encode(future)) {} else { XCTFail("Expected unsupported version") }
+
+        var unknownEvent = Engine.makeInitialState(worldSeed: 1)
+        unknownEvent.pending = "unknown"
+        if case .corrupt = SaveCodec.decode(try SaveCodec.encode(unknownEvent)) {} else { XCTFail("Expected unknown event to be rejected") }
     }
 
     private func encoded(_ state: Republic) throws -> Data {

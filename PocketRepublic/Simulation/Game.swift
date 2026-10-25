@@ -31,10 +31,10 @@ import PocketRepublicCore
             catchUp()
         case .corrupt:
             state = Self.newRepublic(at: now)
-            saveIssue = "The saved republic could not be read. Its data has been preserved. Restart Republic to replace it."
+            saveIssue = "The saved republic could not be read. Its data has been preserved. In Govern, tap Restart Republic to discard it."
         case .unsupportedVersion(let version):
             state = Self.newRepublic(at: now)
-            saveIssue = "Saved republic version \(version) is unsupported. Its data has been preserved. Restart Republic to replace it."
+            saveIssue = "Saved republic version \(version) is unsupported. Its data has been preserved. In Govern, tap Restart Republic to discard it."
         }
     }
 
@@ -49,18 +49,17 @@ import PocketRepublicCore
             UserDefaults.standard.set(data, forKey: key)
             state = candidate
         } catch {
-            saveIssue = "The republic could not be saved. Restart Republic to start a new save."
+            saveIssue = "The republic could not be saved. In Govern, tap Restart Republic to start a new save."
         }
     }
 
     func catchUp() {
         guard saveIssue == nil else { return }
         let elapsed = Date().timeIntervalSince1970 - state.lastSavedAtEpochSeconds
-        guard elapsed.isFinite else {
-            saveIssue = "The saved republic has an invalid timestamp. Its data has been preserved. Restart Republic to replace it."
+        guard let days = OfflineCatchUp.days(elapsedSeconds: elapsed) else {
+            saveIssue = "The saved republic has an invalid timestamp. Its data has been preserved. In Govern, tap Restart Republic to discard it."
             return
         }
-        let days = elapsed >= 64800 ? 3 : max(0, Int(elapsed / 21600))
         for _ in 0..<days where state.pending == nil {
             advance()
         }
