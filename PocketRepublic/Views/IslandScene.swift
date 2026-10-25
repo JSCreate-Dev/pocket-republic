@@ -17,6 +17,14 @@ final class IslandScene: SKScene {
     private var citizenNodes: [CitizenID: SKShapeNode] = [:]
     private var visibleCitizenIDs: [CitizenID] = []
     private var ambientNodes: [Int32: SKShapeNode] = [:]
+    private let reachLayer = SKNode()
+    private let ghostLayer = SKNode()
+    private var placementKind: BuildingKind?
+    private var hoverTile: TileIndex?
+    private var lastGhostKey: GhostDrawKey?
+    private var lastHint: String?
+    private let tileTick = UISelectionFeedbackGenerator()
+    var onPlacementHint: ((String?) -> Void)?
     private var tileTextures: [String: SKTexture] = [:]
     private var routeCache: [RouteKey: [TileIndex]] = [:]
     private var visibleRect: TileRect?
@@ -38,12 +46,16 @@ final class IslandScene: SKScene {
         backgroundColor = UIColor(red: 0.05, green: 0.22, blue: 0.37, alpha: 1)
         isUserInteractionEnabled = true
         terrainLayer.zPosition = 0
+        reachLayer.zPosition = 5
         buildingLayer.zPosition = 10
         selectionLayer.zPosition = 15
+        ghostLayer.zPosition = 20
         peopleLayer.zPosition = 30
         addChild(terrainLayer)
+        addChild(reachLayer)
         addChild(buildingLayer)
         addChild(selectionLayer)
+        addChild(ghostLayer)
         addChild(peopleLayer)
         addChild(cameraNode)
         camera = cameraNode
@@ -57,6 +69,7 @@ final class IslandScene: SKScene {
     override func didMove(to view: SKView) {
         super.didMove(to: view)
         view.ignoresSiblingOrder = true
+        tileTick.prepare()
         refreshVisible(force: true)
     }
 
@@ -118,6 +131,29 @@ final class IslandScene: SKScene {
         }
         clampCameraToMap()
         refreshVisible(force: true)
+        refreshPlacementGhost()
+    }
+
+    /// Building tool for the placement ghost. `fallbackHover` is used only until
+    /// a finger chooses a tile.
+    func setPlacementKind(_ kind: BuildingKind?, fallbackHover: TileIndex?) {
+        var changed = placementKind != kind
+        placementKind = kind
+        if kind == nil {
+            if hoverTile != nil { changed = true }
+            hoverTile = nil
+        } else if hoverTile == nil, let fallbackHover {
+            hoverTile = fallbackHover
+            changed = true
+        }
+        if changed { refreshPlacementGhost() }
+    }
+
+    /// Drop the ghost after a building lands so the new sprite is not covered by a red "occupied" preview.
+    func hidePlacementGhost() {
+        guard hoverTile != nil else { return }
+        hoverTile = nil
+        refreshPlacementGhost()
     }
 
     /// Default scale uses the usable world pane, never the full width across a fold.
@@ -202,16 +238,20 @@ final class IslandScene: SKScene {
             tileNodes.removeValue(forKey: id)
         }
 
-        let frame = state.snapshot(visibleRect: (rect.x0, rect.y0, rect.x1, rect.y1))
+        let buildingRect = rect.expanded(by: 16, map: map)
         var wantedBuildings = Set<BuildingID>()
-        for building in frame.visibleBuildings where map.building(at: building.tile) == building.id {
+        let footprints = CityFootprints.current
+        for building in state.buildings {
+            let covered = footprints.tilesCovered(by: building, on: map)
+            guard let anchor = covered.first,
+                  footprints.buildingID(at: anchor, on: map) == building.id,
+                  let layout = IsoFootprintLayout.make(tiles: covered, map: map),
+                  covered.contains(where: { buildingRect.contains($0, in: map) }) else { continue }
             wantedBuildings.insert(building.id)
             if buildingNodes[building.id] == nil {
-                let node = SKSpriteNode(color: building.kind.color,
-                                        size: CGSize(width: 26, height: building.kind == .townHall ? 32 : 23))
-                node.anchorPoint = CGPoint(x: 0.5, y: 0.12)
-                node.position = point(for: building.tile, in: map)
-                node.zPosition = CGFloat(map.x(of: building.tile) + map.y(of: building.tile)) / 100
+                let node = BuildingArtwork.makeNode(kind: building.kind)
+                node.position = layout.southCorner(halfWidth: halfWidth, halfHeight: halfHeight)
+                node.zPosition = layout.frontSort / 100
                 buildingLayer.addChild(node)
                 buildingNodes[building.id] = node
             }
@@ -418,6 +458,135 @@ final class IslandScene: SKScene {
         return result
     }
 
+    private func updateHover(at location: CGPoint) {
+        guard placementKind != nil, let map = renderedState?.map else { return }
+        let next = tile(at: location, in: map)
+        guard next != hoverTile else { return }
+        hoverTile = next
+        if next != nil {
+            tileTick.selectionChanged()
+            tileTick.prepare()
+        }
+        refreshPlacementGhost()
+    }
+
+    private func refreshPlacementGhost() {
+        guard let kind = placementKind, let origin = hoverTile, let state = renderedState else {
+            clearGhost()
+            return
+        }
+        let preview = CityFootprints.current.placementGhost(of: kind, at: origin, in: state)
+        let accepted: Bool
+        let reason: String?
+        switch preview.result {
+        case .accepted:
+            accepted = true
+            reason = nil
+        case .rejected(let rejection):
+            accepted = false
+            reason = rejection.playerFacingReason
+        }
+        let key = GhostDrawKey(kind: kind.rawValue, origin: origin.raw, accepted: accepted,
+                               reason: reason, entrance: preview.entrance?.raw,
+                               tileCount: preview.tiles.count, stamp: placementStamp(state))
+        if key == lastGhostKey { return }
+        lastGhostKey = key
+        if reason != lastHint {
+            lastHint = reason
+            onPlacementHint?(reason)
+        }
+
+        ghostLayer.removeAllChildren()
+        reachLayer.removeAllChildren()
+        let map = state.map
+        var tiles = preview.tiles
+        if tiles.isEmpty { tiles = [origin] }
+        guard let layout = IsoFootprintLayout.make(tiles: tiles, map: map) else { return }
+
+        let tint = accepted
+            ? UIColor(red: 0.22, green: 0.78, blue: 0.32, alpha: 1)
+            : UIColor(red: 0.90, green: 0.22, blue: 0.20, alpha: 1)
+        let markerSize = CGSize(width: halfWidth * 2, height: halfHeight * 2)
+        let markerTexture = BuildingArtwork.tileMarkerTexture(size: markerSize)
+        for tile in tiles {
+            let marker = SKSpriteNode(texture: markerTexture, size: markerSize)
+            marker.color = tint
+            marker.colorBlendFactor = 0.9
+            marker.alpha = 0.5
+            marker.position = point(for: tile, in: map)
+            ghostLayer.addChild(marker)
+        }
+
+        let ghost = BuildingArtwork.makeNode(kind: kind)
+        ghost.color = tint
+        ghost.colorBlendFactor = 0.55
+        ghost.alpha = 0.82
+        ghost.position = layout.southCorner(halfWidth: halfWidth, halfHeight: halfHeight)
+        ghost.zPosition = 1
+        ghostLayer.addChild(ghost)
+
+        if let reason {
+            let badge = reasonBadge(reason)
+            let height = BuildingSpriteCatalog.spec(for: kind).pointSize.height
+            badge.position = CGPoint(x: ghost.position.x, y: ghost.position.y + height + 16)
+            badge.zPosition = 2
+            ghostLayer.addChild(badge)
+        }
+
+        guard kind.showsServiceReach, let entrance = preview.entrance else { return }
+        let covered = Set(tiles.map(\.raw))
+        let reach = ServiceReach.tiles(from: entrance,
+                                       maxDistance: state.config.maxServiceDistance,
+                                       on: map)
+        for tile in reach where !covered.contains(tile.raw) {
+            let node = SKSpriteNode(texture: markerTexture, size: markerSize)
+            node.color = UIColor(red: 0.98, green: 0.78, blue: 0.22, alpha: 1)
+            node.colorBlendFactor = 1
+            node.alpha = 0.30
+            node.position = point(for: tile, in: map)
+            node.zPosition = CGFloat(map.x(of: tile) + map.y(of: tile)) / 100
+            reachLayer.addChild(node)
+        }
+    }
+
+    private func clearGhost() {
+        ghostLayer.removeAllChildren()
+        reachLayer.removeAllChildren()
+        lastGhostKey = nil
+        guard lastHint != nil else { return }
+        lastHint = nil
+        onPlacementHint?(nil)
+    }
+
+    private func placementStamp(_ state: RepublicState) -> Int {
+        var hash = state.pending == nil ? 17 : 31
+        hash = hash &* 33 &+ Int(truncatingIfNeeded: state.treasury)
+        for flag in state.map.road {
+            hash = hash &* 33 &+ (flag ? 1 : 0)
+        }
+        for id in state.map.buildingAt {
+            hash = hash &* 33 &+ Int(id)
+        }
+        return hash
+    }
+
+    private func reasonBadge(_ text: String) -> SKNode {
+        let label = SKLabelNode(fontNamed: "AvenirNext-Medium")
+        label.text = text
+        label.fontSize = 12
+        label.fontColor = .white
+        label.verticalAlignmentMode = .center
+        label.horizontalAlignmentMode = .center
+        let width = max(label.frame.width + 16, 44)
+        let height = max(label.frame.height + 10, 22)
+        let badge = SKShapeNode(rectOf: CGSize(width: width, height: height), cornerRadius: 7)
+        badge.fillColor = UIColor(white: 0.08, alpha: 0.82)
+        badge.strokeColor = UIColor.white.withAlphaComponent(0.25)
+        badge.lineWidth = 1
+        badge.addChild(label)
+        return badge
+    }
+
     private func resizeNightLayer() {
         nightLayer.size = CGSize(width: size.width * 5, height: size.height * 5)
         nightLayer.position = .zero
@@ -425,8 +594,10 @@ final class IslandScene: SKScene {
 
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
         if let touch = touches.first {
-            touchStart = touch.location(in: self)
+            let location = touch.location(in: self)
+            touchStart = location
             wasDragged = false
+            updateHover(at: location)
         }
     }
 
@@ -454,6 +625,9 @@ final class IslandScene: SKScene {
             if let touchStart, hypot(p.x - touchStart.x, p.y - touchStart.y) > 8 { wasDragged = true }
             refreshVisible()
         }
+        if let touch = touches.first {
+            updateHover(at: touch.location(in: self))
+        }
     }
 
     override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
@@ -478,6 +652,21 @@ private struct TileRect: Equatable {
         let x = map.x(of: tile), y = map.y(of: tile)
         return x >= x0 && x <= x1 && y >= y0 && y <= y1
     }
+
+    func expanded(by pad: Int32, map: WorldMap) -> TileRect {
+        TileRect(x0: max(0, x0 - pad), y0: max(0, y0 - pad),
+                 x1: min(map.width - 1, x1 + pad), y1: min(map.height - 1, y1 + pad))
+    }
+}
+
+private struct GhostDrawKey: Equatable {
+    var kind: UInt8
+    var origin: Int32
+    var accepted: Bool
+    var reason: String?
+    var entrance: Int32?
+    var tileCount: Int
+    var stamp: Int
 }
 
 private extension TerrainKind {
@@ -488,22 +677,6 @@ private extension TerrainKind {
         case .grass: return UIColor(red: 0.32, green: 0.61, blue: 0.35, alpha: 1)
         case .fertile: return UIColor(red: 0.24, green: 0.51, blue: 0.28, alpha: 1)
         case .rock: return UIColor(red: 0.48, green: 0.50, blue: 0.48, alpha: 1)
-        }
-    }
-}
-
-private extension BuildingKind {
-    var color: UIColor {
-        switch self {
-        case .townHall: return .systemYellow
-        case .house: return .systemOrange
-        case .farm: return .systemGreen
-        case .market: return .systemPink
-        case .clinic: return .systemRed
-        case .school: return .systemTeal
-        case .police: return .systemBlue
-        case .workshop: return .brown
-        case .dock: return .systemGray
         }
     }
 }

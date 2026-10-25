@@ -54,7 +54,7 @@ import PocketRepublicCore
             feedback = nil
             save()
         case .rejected(let reason):
-            feedback = reason.message
+            feedback = reason.playerFacingReason
         }
     }
 
@@ -220,24 +220,4 @@ private struct SpatialSave: Codable {
     let formatVersion: Int
     let checksum: UInt64
     let state: RepublicState
-}
-
-private extension IntentRejection {
-    var message: String {
-        switch self {
-        case .outOfBounds: return "That tile is outside the island."
-        case .notBuildable: return "You cannot build on this terrain."
-        case .occupied: return "That tile is occupied."
-        case .notConnectedToRoad: return "Buildings need an adjacent road."
-        case .notEnoughFertileLand: return "Farms need at least half their tiles on fertile land."
-        case .notTouchingWater: return "Docks need a long side against the water."
-        case .insufficientTreasury: return "The treasury cannot afford that."
-        case .noSuchBuilding: return "That building no longer exists."
-        case .cannotDemolishTownHall: return "The town hall must remain."
-        case .noPendingDecision, .decisionMismatch, .invalidOption, .noSuchAgendaItem:
-            return "That decision is no longer available."
-        case .crisisPendingBlocksBuilding: return "Resolve the crisis before building."
-        case .operatingModeNotOffered: return "That building has no operating mode."
-        }
-    }
 }
