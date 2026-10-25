@@ -1,6 +1,6 @@
 # 2026-10-25 11:40 AM EDT — Ios Dev — `cursor/footprint-ghost-render-6511`
 
-Presentation only. The footprint core (sizes, placement rules, `tilesCovered`, entrances, occupancy, `isPassable`) stays with Game Logic. This branch merged main `3b88a5c` (art direction v1 and the app icon) before the first commit. `PROGRESS.md` was not edited.
+Presentation only. The footprint core (sizes, placement rules, `tilesCovered`, entrances, occupancy, `isPassable`) stays with Game Logic. This branch merged main through `f48dc67` (art direction v1, then design sections 4–6 in PR #8). Those new sections are spec only and are not implemented here. `PROGRESS.md` was not edited.
 
 ## What changed
 
