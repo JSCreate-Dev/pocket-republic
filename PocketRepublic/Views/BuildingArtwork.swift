@@ -2,12 +2,11 @@ import SpriteKit
 import UIKit
 import PocketRepublicCore
 
-/// 1x node sizes copied from `docs/art/sprites.json` (PR #4). That file is not
-/// on main yet, so the numbers live here and rendering works either way.
-///
+/// 1x node sizes copied from `docs/art/sprites.json` and design section 7.6.
 /// Set the sprite node's size from `pointSize`, never from `SKTexture.size()`:
-/// a few @2x/@3x heights are one pixel off the 1x height. Every anchor in that
-/// file is (0.5, 0), the bottom-front corner of the picture.
+/// a few @2x/@3x heights are one pixel off the 1x height. Every anchor is
+/// (0.5, 0), the bottom-front corner of the picture, including foundation and
+/// scaffold so a stage swap does not slide the building on the ground.
 ///
 /// `artTilesWide` and `artTilesDeep` describe the picture only. Which tiles a
 /// building occupies still comes from `CityFootprintModel`.
@@ -77,13 +76,53 @@ enum BuildingSpriteCatalog {
     }
 }
 
+/// Footprint shape for the shared site art. 3×2 and 2×3 are different diamonds.
+enum SiteFootprintShape {
+    case twoByTwo, threeByTwo, twoByThree, threeByThree
+
+    static func of(_ kind: BuildingKind) -> SiteFootprintShape {
+        switch (kind.footprint.width, kind.footprint.height) {
+        case (2, 2): return .twoByTwo
+        case (3, 2): return .threeByTwo
+        case (2, 3): return .twoByThree
+        default: return .threeByThree
+        }
+    }
+}
+
+enum SiteSpriteCatalog {
+    /// Section 7.6 sizes. The finished sprite stays in `BuildingSpriteCatalog`.
+    static func spec(kind: BuildingKind, stage: ConstructionStage) -> (size: CGSize, imageName: String) {
+        let shape = SiteFootprintShape.of(kind)
+        switch stage {
+        case .foundation:
+            switch shape {
+            case .twoByTwo: return (CGSize(width: 128, height: 74), "site_foundation_2x2")
+            case .threeByTwo: return (CGSize(width: 160, height: 90), "site_foundation_3x2")
+            case .twoByThree: return (CGSize(width: 160, height: 90), "site_foundation_2x3")
+            case .threeByThree: return (CGSize(width: 192, height: 106), "site_foundation_3x3")
+            }
+        case .scaffold:
+            switch shape {
+            case .twoByTwo: return (CGSize(width: 128, height: 96), "site_scaffold_2x2")
+            case .threeByTwo: return (CGSize(width: 160, height: 112), "site_scaffold_3x2")
+            case .twoByThree: return (CGSize(width: 160, height: 112), "site_scaffold_2x3")
+            case .threeByThree: return (CGSize(width: 192, height: 136), "site_scaffold_3x3")
+            }
+        case .complete:
+            let finished = BuildingSpriteCatalog.spec(for: kind)
+            return (finished.pointSize, finished.imageName)
+        }
+    }
+}
+
 enum BuildingArtwork {
-    /// Catalog sprite when `building_<kind>` exists, otherwise a placeholder of
-    /// the same point size. Dropping the imageset in is the whole art swap.
-    static func makeNode(kind: BuildingKind) -> SKSpriteNode {
-        let spec = BuildingSpriteCatalog.spec(for: kind)
-        let node = SKSpriteNode(texture: texture(for: kind), size: spec.pointSize)
-        node.anchorPoint = spec.anchor
+    /// Finished catalog sprite, or the foundation/scaffold imageset for a site.
+    /// A missing imageset draws a same-size placeholder so the stage still reads.
+    static func makeNode(kind: BuildingKind, stage: ConstructionStage = .complete) -> SKSpriteNode {
+        let node = SKSpriteNode(texture: texture(kind: kind, stage: stage),
+                                size: SiteSpriteCatalog.spec(kind: kind, stage: stage).size)
+        node.anchorPoint = CGPoint(x: 0.5, y: 0)
         return node
     }
 
@@ -104,17 +143,51 @@ enum BuildingArtwork {
     private static var spriteTextures: [String: SKTexture] = [:]
     private static var markerTextures: [CGSizeKey: SKTexture] = [:]
 
-    private static func texture(for kind: BuildingKind) -> SKTexture {
-        let spec = BuildingSpriteCatalog.spec(for: kind)
+    private static func texture(kind: BuildingKind, stage: ConstructionStage) -> SKTexture {
+        let spec = SiteSpriteCatalog.spec(kind: kind, stage: stage)
         if let cached = spriteTextures[spec.imageName] { return cached }
         let texture: SKTexture
         if let image = UIImage(named: spec.imageName) {
             texture = SKTexture(image: image)
             texture.filteringMode = .linear
+        } else if stage == .complete {
+            texture = placeholder(kind: kind, size: spec.size)
         } else {
-            texture = placeholder(kind: kind, size: spec.pointSize)
+            texture = sitePlaceholder(stage: stage, size: spec.size)
         }
         spriteTextures[spec.imageName] = texture
+        return texture
+    }
+
+    /// Flat dug earth, or a short timber frame, when the site imageset is missing.
+    private static func sitePlaceholder(stage: ConstructionStage, size: CGSize) -> SKTexture {
+        let image = renderer(size).image { _ in
+            let width = size.width
+            let height = size.height
+            let diamondHeight = width / 2
+            let south = CGPoint(x: width / 2, y: height)
+            let east = CGPoint(x: width, y: height - diamondHeight / 2)
+            let north = CGPoint(x: width / 2, y: height - diamondHeight)
+            let west = CGPoint(x: 0, y: height - diamondHeight / 2)
+            let earth = UIColor(red: 0.55, green: 0.40, blue: 0.24, alpha: 1)
+            fill(polygon([west, south, east, north]), earth)
+            stroke(polygon([west, south, east, north]))
+            if stage == .scaffold {
+                let timber = UIColor(red: 0.62, green: 0.45, blue: 0.22, alpha: 1)
+                timber.setStroke()
+                let frame = UIBezierPath()
+                frame.move(to: west)
+                frame.addLine(to: CGPoint(x: west.x + 8, y: west.y - 28))
+                frame.move(to: east)
+                frame.addLine(to: CGPoint(x: east.x - 8, y: east.y - 28))
+                frame.move(to: CGPoint(x: west.x + 8, y: west.y - 28))
+                frame.addLine(to: CGPoint(x: east.x - 8, y: east.y - 28))
+                frame.lineWidth = 3
+                frame.stroke()
+            }
+        }
+        let texture = SKTexture(image: image)
+        texture.filteringMode = .nearest
         return texture
     }
 

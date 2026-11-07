@@ -13,7 +13,12 @@ final class IslandScene: SKScene {
     private let nightLayer = SKSpriteNode(color: .black, size: .zero)
     private var renderedState: RepublicState?
     private var tileNodes: [Int32: SKSpriteNode] = [:]
-    private var buildingNodes: [BuildingID: SKSpriteNode] = [:]
+    private var buildingNodes: [BuildingID: SKNode] = [:]
+    /// What the player has already been shown. Effects key off this, not off redraws.
+    private var siteVisuals: [BuildingID: SiteVisual] = [:]
+    private var siteLayouts: [BuildingID: IsoFootprintLayout] = [:]
+    private var presentedSeed: UInt64?
+    private var presentationPrimed = false
     private var citizenNodes: [CitizenID: SKSpriteNode] = [:]
     private var visibleCitizenIDs: [CitizenID] = []
     private var routines: [CitizenID: DailyRoutine] = [:]
@@ -115,6 +120,11 @@ final class IslandScene: SKScene {
            old.day != state.day || old.map.road != state.map.road || old.map.buildingAt != state.map.buildingAt {
             routines.removeAll()
         }
+        if presentedSeed != state.worldSeed {
+            resetConstructionPresentation()
+            presentedSeed = state.worldSeed
+        }
+        noteConstruction(in: state)
         renderedState = state
         if !cameraInitialized {
             let middle = state.map.width / 2
@@ -253,20 +263,296 @@ final class IslandScene: SKScene {
                   let layout = IsoFootprintLayout.make(tiles: covered, map: map),
                   covered.contains(where: { buildingRect.contains($0, in: map) }) else { continue }
             wantedBuildings.insert(building.id)
-            if buildingNodes[building.id] == nil {
-                let node = BuildingArtwork.makeNode(kind: building.kind)
-                node.position = layout.southCorner(halfWidth: halfWidth, halfHeight: halfHeight)
-                node.zPosition = layout.frontSort / 100
-                buildingLayer.addChild(node)
-                buildingNodes[building.id] = node
-            }
+            siteLayouts[building.id] = layout
+            presentBuilding(building, layout: layout, config: state.config)
         }
-        for (id, node) in buildingNodes where !wantedBuildings.contains(id) {
-            node.removeFromParent()
+        let goneBuildings = buildingNodes.keys.filter { !wantedBuildings.contains($0) }
+        for id in goneBuildings {
+            buildingNodes[id]?.removeFromParent()
             buildingNodes.removeValue(forKey: id)
+            siteLayouts.removeValue(forKey: id)
         }
         refreshPeople(state: state, rect: rect)
         refreshSelection()
+    }
+
+    /// A new city, or the first picture of a loaded save, must not replay pops.
+    private func resetConstructionPresentation() {
+        for (_, node) in buildingNodes { node.removeFromParent() }
+        buildingNodes.removeAll()
+        siteLayouts.removeAll()
+        siteVisuals.removeAll()
+        presentationPrimed = false
+    }
+
+    /// Records which sites exist. The first picture of a city is quiet: worldgen
+    /// buildings and a loaded save are already whatever stage the core says.
+    private func noteConstruction(in state: RepublicState) {
+        var live = Set<BuildingID>()
+        if !presentationPrimed {
+            for building in state.buildings {
+                live.insert(building.id)
+                siteVisuals[building.id] = SiteVisual(
+                    displayed: nil,
+                    sawSite: building.isUnderConstruction,
+                    quiet: true
+                )
+            }
+            presentationPrimed = true
+        } else {
+            for building in state.buildings {
+                live.insert(building.id)
+                if var visual = siteVisuals[building.id] {
+                    if building.isUnderConstruction { visual.sawSite = true }
+                    siteVisuals[building.id] = visual
+                } else {
+                    siteVisuals[building.id] = SiteVisual(
+                        displayed: nil,
+                        sawSite: building.isUnderConstruction,
+                        quiet: false
+                    )
+                }
+            }
+        }
+        let staleSites = siteVisuals.keys.filter { !live.contains($0) }
+        for id in staleSites {
+            siteVisuals.removeValue(forKey: id)
+        }
+    }
+
+    /// Shows the sprite that matches `building.stage`. A transition plays once
+    /// per stage change. Panning, folding, and `render` do not start it again.
+    private func presentBuilding(_ building: Building, layout: IsoFootprintLayout, config: BalanceConfig) {
+        let stage = building.stage(in: config)
+        var visual = siteVisuals[building.id] ?? SiteVisual(displayed: nil, sawSite: building.isUnderConstruction, quiet: true)
+        let hadNode = buildingNodes[building.id] != nil
+        let container = buildingContainer(building.id, layout: layout)
+        let stageChanged = visual.displayed != nil && visual.displayed != stage
+        let firstShow = visual.displayed == nil
+
+        if visual.quiet {
+            installBody(stage, kind: building.kind, on: container, dimmed: stage != .complete)
+            visual.quiet = false
+            visual.displayed = stage
+        } else if stageChanged && hadNode {
+            if stage == .complete && visual.sawSite {
+                installBody(stage, kind: building.kind, on: container, dimmed: false)
+                playCompletionPop(on: container)
+            } else if stage == .scaffold, visual.displayed == .foundation {
+                crossfadeBody(to: stage, kind: building.kind, on: container)
+            } else {
+                installBody(stage, kind: building.kind, on: container, dimmed: stage != .complete)
+            }
+            visual.displayed = stage
+        } else if firstShow {
+            installBody(stage, kind: building.kind, on: container, dimmed: stage != .complete)
+            if stage == .complete && visual.sawSite {
+                playCompletionPop(on: container)
+            } else if stage != .complete || building.daysRequired == 0 {
+                playPlacementLand(on: container)
+            }
+            visual.displayed = stage
+        } else if !hadNode {
+            installBody(stage, kind: building.kind, on: container, dimmed: stage != .complete)
+            if stageChanged, stage == .complete, visual.sawSite {
+                playCompletionPop(on: container)
+            }
+            visual.displayed = stage
+        }
+        if building.isUnderConstruction { visual.sawSite = true }
+        siteVisuals[building.id] = visual
+        configureCrew(on: container, stage: visual.displayed ?? stage, kind: building.kind)
+    }
+
+    private func buildingContainer(_ id: BuildingID, layout: IsoFootprintLayout) -> SKNode {
+        if let existing = buildingNodes[id] {
+            existing.position = layout.southCorner(halfWidth: halfWidth, halfHeight: halfHeight)
+            existing.zPosition = layout.frontSort / 100
+            return existing
+        }
+        let container = SKNode()
+        container.position = layout.southCorner(halfWidth: halfWidth, halfHeight: halfHeight)
+        container.zPosition = layout.frontSort / 100
+        container.isUserInteractionEnabled = false
+        buildingLayer.addChild(container)
+        buildingNodes[id] = container
+        return container
+    }
+
+    private func installBody(_ stage: ConstructionStage, kind: BuildingKind, on container: SKNode, dimmed: Bool) {
+        container.childNode(withName: "outgoing")?.removeFromParent()
+        container.childNode(withName: "body")?.removeFromParent()
+        let body = BuildingArtwork.makeNode(kind: kind, stage: stage)
+        body.name = "body"
+        body.alpha = dimmed ? 0.94 : 1
+        body.zPosition = 0
+        container.addChild(body)
+    }
+
+    /// Foundation to scaffold. About 0.2s, dust at the base, no haptic.
+    private func crossfadeBody(to stage: ConstructionStage, kind: BuildingKind, on container: SKNode) {
+        if let current = container.childNode(withName: "body") {
+            current.name = "outgoing"
+            current.removeAllActions()
+            current.run(.sequence([.fadeOut(withDuration: 0.2), .removeFromParent()]))
+        }
+        let body = BuildingArtwork.makeNode(kind: kind, stage: stage)
+        body.name = "body"
+        body.alpha = 0
+        body.zPosition = 0
+        container.addChild(body)
+        body.run(.fadeAlpha(to: 0.94, duration: 0.2))
+        puffDust(on: container, scale: 1.15)
+    }
+
+    /// The opening. Plays once, then `displayed` stays `.complete`.
+    private func playCompletionPop(on container: SKNode) {
+        guard let body = container.childNode(withName: "body") else { return }
+        body.removeAction(forKey: "pop")
+        body.setScale(0.85)
+        body.alpha = 1
+        body.run(.sequence([
+            .scale(to: 1.06, duration: 0.14),
+            .scale(to: 1.0, duration: 0.11)
+        ]), withKey: "pop")
+        puffDust(on: container, scale: 1.7)
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+    }
+
+    /// The foundation (or an instant open) landing under the finger.
+    private func playPlacementLand(on container: SKNode) {
+        guard let body = container.childNode(withName: "body") else { return }
+        body.removeAction(forKey: "land")
+        body.setScale(0.9)
+        body.run(.sequence([
+            .scale(to: 1.05, duration: 0.12),
+            .scale(to: 1.0, duration: 0.08)
+        ]), withKey: "land")
+        puffDust(on: container, scale: 1.05)
+    }
+
+    private func puffDust(on container: SKNode, scale: CGFloat) {
+        container.childNode(withName: "dust")?.removeFromParent()
+        let dust = SKShapeNode(circleOfRadius: 18)
+        dust.name = "dust"
+        dust.fillColor = UIColor(red: 0.72, green: 0.62, blue: 0.42, alpha: 0.45)
+        dust.strokeColor = .clear
+        dust.position = CGPoint(x: 0, y: 10)
+        dust.zPosition = 2
+        dust.setScale(0.35)
+        container.addChild(dust)
+        dust.run(.sequence([
+            .group([
+                .scale(to: scale, duration: 0.28),
+                .fadeOut(withDuration: 0.28)
+            ]),
+            .removeFromParent()
+        ]))
+    }
+
+    /// Two decorative builders and a pennant on a scaffold. They are not citizens.
+    private func configureCrew(on container: SKNode, stage: ConstructionStage, kind: BuildingKind) {
+        if stage != .scaffold {
+            container.childNode(withName: "crew")?.removeFromParent()
+            container.childNode(withName: "pennant")?.removeFromParent()
+            return
+        }
+        if container.childNode(withName: "crew") == nil {
+            let crew = SKNode()
+            crew.name = "crew"
+            crew.zPosition = 1
+            for index in 0..<2 {
+                let walker = SKSpriteNode()
+                walker.size = CGSize(width: 14, height: 22)
+                walker.anchorPoint = CGPoint(x: 0.5, y: 0)
+                walker.name = "builder-\(index)"
+                crew.addChild(walker)
+            }
+            container.addChild(crew)
+        }
+        if container.childNode(withName: "pennant") == nil {
+            let cloth = SKShapeNode(path: pennantPath())
+            cloth.name = "pennant"
+            cloth.fillColor = UIColor(red: 0.82, green: 0.33, blue: 0.18, alpha: 0.95)
+            cloth.strokeColor = UIColor(white: 0.2, alpha: 0.4)
+            cloth.lineWidth = 0.5
+            let height = SiteSpriteCatalog.spec(kind: kind, stage: .scaffold).size.height
+            cloth.position = CGPoint(x: 10, y: height * 0.72)
+            cloth.zPosition = 3
+            container.addChild(cloth)
+        }
+    }
+
+    private func pennantPath() -> CGPath {
+        let path = CGMutablePath()
+        path.move(to: CGPoint(x: 0, y: 0))
+        path.addLine(to: CGPoint(x: 0, y: 16))
+        path.addLine(to: CGPoint(x: 11, y: 11))
+        path.closeSubpath()
+        return path
+    }
+
+    private func stepCrew(time: TimeInterval) {
+        for (id, container) in buildingNodes {
+            guard let crew = container.childNode(withName: "crew"),
+                  let layout = siteLayouts[id] else { continue }
+            let loop = footprintLoop(layout)
+            guard loop.count >= 2 else { continue }
+            let period: TimeInterval = 7
+            let phase = Double(UInt32(bitPattern: id.raw) % 100) / 100
+            for index in 0..<2 {
+                guard let walker = crew.childNode(withName: "builder-\(index)") as? SKSpriteNode else { continue }
+                let offset = Double(index) * 0.5
+                let t = ((time / period) + phase + offset).truncatingRemainder(dividingBy: 1)
+                let pose = pointOnLoop(loop, t: t < 0 ? t + 1 : t)
+                walker.position = pose.point
+                walker.xScale = pose.facing.xScale
+                let frame = Int(time / 0.18) % 2
+                walker.texture = MapArt.walkerTexture(variant: index, facing: pose.facing, frame: frame) ?? proceduralWalker
+            }
+            if let pennant = container.childNode(withName: "pennant") {
+                pennant.zRotation = sin(time * 2.4 + phase * 6) * 0.22
+            }
+        }
+    }
+
+    private func footprintLoop(_ layout: IsoFootprintLayout) -> [CGPoint] {
+        let origin = layout.southCorner(halfWidth: halfWidth, halfHeight: halfHeight)
+        let corners = [
+            diamondTip(.south, x: layout.maxX, y: layout.maxY),
+            diamondTip(.east, x: layout.maxX, y: layout.minY),
+            diamondTip(.north, x: layout.minX, y: layout.minY),
+            diamondTip(.west, x: layout.minX, y: layout.maxY)
+        ]
+        return corners.map { CGPoint(x: $0.x - origin.x, y: $0.y - origin.y) }
+    }
+
+    private enum DiamondTip { case north, east, south, west }
+
+    private func diamondTip(_ tip: DiamondTip, x: Int32, y: Int32) -> CGPoint {
+        let center = point(x: x, y: y)
+        switch tip {
+        case .north: return CGPoint(x: center.x, y: center.y + halfHeight)
+        case .east: return CGPoint(x: center.x + halfWidth, y: center.y)
+        case .south: return CGPoint(x: center.x, y: center.y - halfHeight)
+        case .west: return CGPoint(x: center.x - halfWidth, y: center.y)
+        }
+    }
+
+    private func pointOnLoop(_ loop: [CGPoint], t: Double) -> (point: CGPoint, facing: WalkerFacing) {
+        let scaled = t * Double(loop.count)
+        let index = min(loop.count - 1, Int(scaled))
+        let next = (index + 1) % loop.count
+        let part = CGFloat(scaled - Double(index))
+        let a = loop[index]
+        let b = loop[next]
+        let point = CGPoint(x: a.x + (b.x - a.x) * part, y: a.y + (b.y - a.y) * part)
+        let facing: WalkerFacing
+        if b.x >= a.x && b.y >= a.y { facing = .ne }
+        else if b.x >= a.x { facing = .se }
+        else if b.y < a.y { facing = .sw }
+        else { facing = .nw }
+        return (point, facing)
     }
 
     /// Highlights every tile `BuildingOccupancy` assigns to the building, not only its origin.
@@ -435,6 +721,7 @@ final class IslandScene: SKScene {
         animationTime = currentTime
         let phase = (currentTime / 100 + Double(state.day % 3) / 3).truncatingRemainder(dividingBy: 1)
         nightLayer.alpha = CGFloat(0.07 + 0.25 * (1 - cos(phase * .pi * 2)) / 2)
+        stepCrew(time: currentTime)
 
         let map = state.map
         for id in visibleCitizenIDs {
@@ -593,23 +880,32 @@ final class IslandScene: SKScene {
             ghostLayer.addChild(marker)
         }
 
-        let ghost = BuildingArtwork.makeNode(kind: kind)
+        let buildDays = state.config.constructionDays(for: kind)
+        let ghostStage: ConstructionStage = buildDays > 0 ? .foundation : .complete
+        let ghost = BuildingArtwork.makeNode(kind: kind, stage: ghostStage)
         ghost.color = tint
-        ghost.colorBlendFactor = 0.55
-        ghost.alpha = 0.82
+        ghost.colorBlendFactor = buildDays > 0 ? 0.4 : 0.55
+        ghost.alpha = 0.88
         ghost.position = layout.southCorner(halfWidth: halfWidth, halfHeight: halfHeight)
         ghost.zPosition = 1
         ghostLayer.addChild(ghost)
 
+        let height = SiteSpriteCatalog.spec(kind: kind, stage: ghostStage).size.height
         if let reason {
             let badge = reasonBadge(reason)
-            let height = BuildingSpriteCatalog.spec(for: kind).pointSize.height
             badge.position = CGPoint(x: ghost.position.x, y: ghost.position.y + height + 16)
             badge.zPosition = 2
             ghostLayer.addChild(badge)
         }
 
         guard kind.showsServiceReach, let entrance = preview.entrance else { return }
+        if buildDays > 0 {
+            let wait = buildDays == 1 ? "Reach when it opens, in 1 day" : "Reach when it opens, in \(buildDays) days"
+            let caption = reasonBadge(wait)
+            caption.position = CGPoint(x: ghost.position.x, y: ghost.position.y + height + (reason == nil ? 18 : 46))
+            caption.zPosition = 2
+            ghostLayer.addChild(caption)
+        }
         let covered = Set(tiles.map(\.raw))
         let reach = ServiceReach.tiles(from: entrance,
                                        maxDistance: state.config.maxServiceDistance,
@@ -712,6 +1008,14 @@ final class IslandScene: SKScene {
               let tile = tile(at: touch.location(in: self), in: state.map) else { return }
         onTileTap?(tile)
     }
+}
+
+/// Remembers which construction picture a building has already shown.
+/// `quiet` is the first paint of a city or a loaded save: no bounce and no pop.
+private struct SiteVisual {
+    var displayed: ConstructionStage?
+    var sawSite: Bool
+    var quiet: Bool
 }
 
 struct CameraFraming: Equatable {

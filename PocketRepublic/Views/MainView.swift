@@ -34,63 +34,45 @@ struct MainView: View {
 
     private var people: some View {
         NavigationStack {
-            List(game.state.citizens.filter(\.alive)) { citizen in
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(citizen.name).font(.headline)
-                    Text("\(String(describing: citizen.occupation).capitalized) · Happiness \(citizen.happiness)% · $\(citizen.money)")
-                        .font(.caption).foregroundStyle(.secondary)
-                }
-            }
-            .navigationTitle("Citizens")
+            CitizenDirectory()
+                .navigationTitle("People")
+                .navigationBarTitleDisplayMode(.inline)
         }
     }
 
     private var govern: some View {
         NavigationStack {
-            Form {
-                Section("Government") {
-                    Text("Legitimacy: \(game.snapshot.legitimacy)%")
-                    Text("Corruption: \(game.snapshot.corruption)%")
-                    Stepper("Income tax: \(game.state.policy.incomeTaxPercent)%", value: Binding(
-                        get: { Int(game.state.policy.incomeTaxPercent) },
-                        set: { newValue in
-                            var next = game.state.policy
-                            next.incomeTaxPercent = Int32(newValue)
-                            game.send(.setPolicy(next))
-                        }
-                    ), in: 0...60, step: 5)
+            ScrollView {
+                VStack(alignment: .leading, spacing: RepublicTheme.Space.lg) {
+                    DecreeBoard()
+                    save
                 }
-                .disabled(game.saveIssue != nil)
-
-                Section("Decisions") {
-                    ForEach(game.state.agenda) { item in
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text(item.kind.title).font(.headline)
-                            if let cause = item.causes.first {
-                                Text("\(cause.detail): \(cause.value)")
-                                    .font(.caption).foregroundStyle(.secondary)
-                            }
-                            ForEach(item.options) { option in
-                                Button(option.label) {
-                                    game.send(.resolveAgendaItem(item.id, option: option.id))
-                                }
-                            }
-                        }
-                    }
-                }
-                .disabled(game.saveIssue != nil)
-
-                Section("Save") {
-                    if game.hasPrototypeSave {
-                        Text("Your earlier prototype save remains on this device. This city uses a separate save.")
-                            .font(.caption)
-                    }
-                    if let issue = game.saveIssue { Text(issue).foregroundStyle(.red) }
-                    Button("Start New City", role: .destructive) { confirmNewCity = true }
-                }
+                .padding(RepublicTheme.Space.md)
             }
-            .navigationTitle("Government")
+            .background(RepublicTheme.cream)
+            .navigationTitle("Govern")
+            .navigationBarTitleDisplayMode(.inline)
         }
+    }
+
+    private var save: some View {
+        VStack(alignment: .leading, spacing: RepublicTheme.Space.sm) {
+            if game.hasPrototypeSave {
+                Text("Your earlier prototype save remains on this device. This city uses a separate save.")
+                    .font(RepublicTheme.body(.caption))
+                    .foregroundStyle(RepublicTheme.inkSoft)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if let issue = game.saveIssue {
+                Text(issue)
+                    .font(RepublicTheme.body(.subheadline))
+                    .foregroundStyle(RepublicTheme.alert)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Button("Start New City", role: .destructive) { confirmNewCity = true }
+                .frame(minHeight: 44)
+        }
+        .dioramaCard()
     }
 
     private var events: some View {
@@ -109,18 +91,6 @@ struct MainView: View {
 
 private extension Optional where Wrapped == String {
     var orEmpty: String { self ?? "" }
-}
-
-private extension AgendaKind {
-    var title: String {
-        switch self {
-        case .factionDemand: return "Faction demand"
-        case .advisoryTradeoff: return "Council advice"
-        case .decree: return "Decree"
-        case .buildingCommission: return "New building commission"
-        case .election: return "Election"
-        }
-    }
 }
 
 private extension EventKind {
