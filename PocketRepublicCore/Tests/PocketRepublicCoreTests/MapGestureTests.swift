@@ -50,10 +50,17 @@ final class MapGestureTests: XCTestCase {
 
         let pinch = MapCameraNudge.applying(x: 100, y: 50, scale: 1,
                                             panX: 0, panY: 0,
-                                            anchorX: 130, anchorY: 40, scaleFactor: 0.5)
-        XCTAssertEqual(pinch.x, 115, accuracy: 0.001)
-        XCTAssertEqual(pinch.y, 45, accuracy: 0.001)
-        XCTAssertEqual(pinch.scale, 0.5, accuracy: 0.001)
+                                            anchorX: 130, anchorY: 40, scaleFactor: 0.8)
+        XCTAssertEqual(pinch.x, 106, accuracy: 0.001)
+        XCTAssertEqual(pinch.y, 48, accuracy: 0.001)
+        XCTAssertEqual(pinch.scale, 0.8, accuracy: 0.001)
+
+        let floored = MapCameraNudge.applying(x: 100, y: 50, scale: 1,
+                                              panX: 0, panY: 0,
+                                              anchorX: 130, anchorY: 40, scaleFactor: 0.5)
+        XCTAssertEqual(floored.scale, 0.55, accuracy: 0.001)
+        XCTAssertEqual(floored.x, 113.5, accuracy: 0.001)
+        XCTAssertEqual(floored.y, 45.5, accuracy: 0.001)
 
         let both = MapCameraNudge.applying(x: 100, y: 50, scale: 1,
                                            panX: 10, panY: 0,
