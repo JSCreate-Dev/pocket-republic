@@ -6,6 +6,7 @@ import PocketRepublicCore
 /// Screen-space controls use the local scene geometry and Apple's reserved regions.
 /// The SpriteKit world stays behind them and is never part of the saved simulation.
 struct IslandView: View {
+    var islandVisible: Bool
     @EnvironmentObject private var game: Game
     @EnvironmentObject private var clock: DayClock
     @Environment(\.verticalSizeClass) private var verticalSizeClass
@@ -23,6 +24,10 @@ struct IslandView: View {
     @State private var dismissedBlocking: DecisionID?
     @State private var seenSeason: String?
     @State private var seasonBanner: String?
+    @State private var showCatalog = false
+    @State private var showCharter = false
+    @State private var placeTile: TileIndex?
+    @State private var roadDraft: [TileIndex] = []
 
     var body: some View {
         GeometryReader { geometry in
@@ -31,12 +36,14 @@ struct IslandView: View {
                                            layoutDirection: layoutDirection,
                                            tentMode: tentMode,
                                            sheetExpanded: sheetExpanded,
-                                           tentControlsOpen: tentControlsOpen)
+                                           tentControlsOpen: tentControlsOpen,
+                                           detailOpen: detailOpen,
+                                           cardOpen: cardOpen)
             ZStack(alignment: .topLeading) {
                 SpriteView(scene: scene)
                     .background(Color(red: 0.05, green: 0.22, blue: 0.37))
 
-                if layout.isSingleScreen {
+                if layout.mapFirst {
                     HStack(alignment: .top, spacing: 8) {
                         status(in: layout)
                         if layout.canUseTent {
@@ -65,7 +72,7 @@ struct IslandView: View {
                     controls(in: layout)
                         .frame(width: layout.controls.width, height: layout.controls.height)
                         .background {
-                            if layout.isSingleScreen {
+                            if layout.mapFirst {
                                 UnevenRoundedRectangle(topLeadingRadius: 18, topTrailingRadius: 18)
                                     .fill(.regularMaterial)
                             } else {
@@ -103,11 +110,33 @@ struct IslandView: View {
                 self.selectedAgendaID = nil
             }
         }
-        .onChange(of: selectedBuildingID) { _, id in
-            scene.setSelection(id)
-        }
         .onChange(of: tool) { _, newTool in
             if newTool != .inspect { selectedBuildingID = nil }
+            if newTool != .road {
+                roadDraft = []
+                scene.setRoadPreview([])
+            }
+            if !newTool.isBuilding { placeTile = nil }
+            if newTool != .inspect { showCatalog = false }
+            clock.setModal(IslandSessionHold.buildToken, presented: newTool != .inspect)
+            configureTapHandler()
+        }
+        .onChange(of: showCatalog) { _, shown in
+            clock.setModal(IslandSessionHold.catalogToken, presented: shown)
+        }
+        .onChange(of: islandVisible) { _, visible in
+            if !visible { leaveBuildSession() }
+        }
+        .onDisappear {
+            if !islandVisible { leaveBuildSession() }
+        }
+        .onChange(of: selectedBuildingID) { _, id in
+            scene.setSelection(id)
+            if let building = selectedBuilding, building.kind.showsServiceReach, !building.isUnderConstruction {
+                scene.showInspectReach(from: building.tile)
+            } else {
+                scene.showInspectReach(from: nil)
+            }
         }
         .onChange(of: attentionCue) { _, _ in
             presentAttention()
@@ -123,17 +152,29 @@ struct IslandView: View {
 
     @ViewBuilder private func controls(in layout: CityDisplayLayout) -> some View {
         let scrolling = VStack(spacing: 8) {
-            SeasonCard()
-            if game.state.pending == nil && selectedAgenda == nil {
-                agendaPreviews(layout: layout)
-            } else if game.state.pending == nil, let blocking = blockingItem, selectedAgenda?.id != blocking.id {
-                previewButton(blocking)
+            if showCharter { SeasonCard() }
+            if let chip = attentionChip {
+                Button {
+                    selectedAgendaID = chip.id
+                    showCatalog = false
+                } label: {
+                    Text(previewTitle(chip))
+                        .font(.caption.weight(.semibold))
+                        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                }
+                .buttonStyle(.borderedProminent)
+                .accessibilityHint("Opens this decision without covering the map")
             }
-            if !layout.scrollControls { Spacer(minLength: 0) }
             if let pending = game.state.pending {
                 crisisCard(pending, layout: layout)
             } else if let item = selectedAgenda {
                 agendaCard(item, layout: layout)
+            } else if tool.isBuilding {
+                placeBar
+            } else if tool == .road {
+                roadBar
+            } else if showCatalog {
+                catalog
             } else {
                 if let inspection = buildingInspection {
                     BuildingInspectPanel(
@@ -157,35 +198,103 @@ struct IslandView: View {
                         .padding(.vertical, 5)
                         .background(.regularMaterial, in: Capsule())
                 }
-                toolStrip(compact: layout.compactTools, narrow: false)
+                if !layout.mapFirst {
+                    toolStrip(compact: layout.compactTools, narrow: false)
+                }
             }
         }
         .padding(.horizontal, 8)
 
         VStack(spacing: 8) {
-            if layout.isSingleScreen {
+            if layout.mapFirst {
+                EmptyView()
+            } else if layout.isSingleScreen {
                 sheetGrabber(layout)
             } else {
                 status(in: layout)
                     .padding(.horizontal, 8)
             }
-            if layout.scrollControls {
+            if layout.mapFirst {
+                if detailOpen {
+                    ScrollView(.vertical, showsIndicators: false) { scrolling }
+                }
+            } else if layout.scrollControls {
                 ScrollView(.vertical, showsIndicators: false) { scrolling }
             } else {
                 scrolling
             }
-            dayClockControls
+            if layout.mapFirst {
+                mapDock()
+            } else {
+                dayClockControls
+                    .padding(.horizontal, 8)
+                Button { game.advance() } label: {
+                    Label("Advance One Day", systemImage: "forward.fill")
+                        .frame(maxWidth: .infinity, minHeight: 44)
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(game.state.blocksAdvance || game.saveIssue != nil)
                 .padding(.horizontal, 8)
-            Button { game.advance() } label: {
-                Label(layout.isSingleScreen ? "Next Day" : "Advance One Day", systemImage: "forward.fill")
-                    .frame(maxWidth: .infinity, minHeight: 44)
             }
-            .buttonStyle(.borderedProminent)
-            .disabled(game.state.blocksAdvance || game.saveIssue != nil)
-            .padding(.horizontal, 8)
         }
         .padding(.top, layout.occlusionTopInset)
         .padding(.bottom, 8)
+    }
+
+    private func mapDock() -> some View {
+        VStack(spacing: 6) {
+            HStack(spacing: 6) {
+                dockTool(.inspect)
+                Button {
+                    showCatalog.toggle()
+                    if showCatalog { tool = .inspect }
+                } label: {
+                    Label(showCatalog ? "Close build" : "Build", systemImage: "building.2.fill")
+                        .font(.caption.weight(.semibold))
+                        .frame(maxWidth: .infinity, minHeight: 44)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(showCatalog || tool.isBuilding ? .mint : .indigo)
+                .accessibilityLabel("Build")
+                dockTool(.road)
+            }
+            HStack(spacing: 6) {
+                Menu {
+                    Button("Paused") { clock.setPace(.paused) }
+                    Button("Leisurely · 6 seconds") { clock.setPace(.playing(DayClockPolicy.leisurely)) }
+                    Button("Steady · 3.5 seconds") { clock.setPace(.playing(DayClockPolicy.steady)) }
+                    Button("Brisk · 2 seconds") { clock.setPace(.playing(DayClockPolicy.brisk)) }
+                } label: {
+                    Label(clock.policy.controlLabel, systemImage: clock.policy.tickInterval == nil ? "pause.fill" : "play.fill")
+                        .font(.caption.weight(.semibold))
+                        .frame(maxWidth: .infinity, minHeight: 44)
+                }
+                .buttonStyle(.bordered)
+                Button { game.advance() } label: {
+                    Label("Next Day", systemImage: "forward.fill")
+                        .font(.caption.weight(.semibold))
+                        .frame(maxWidth: .infinity, minHeight: 44)
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(game.state.blocksAdvance || game.saveIssue != nil)
+            }
+        }
+        .padding(.horizontal, 8)
+    }
+
+    private func dockTool(_ option: CityTool) -> some View {
+        Button {
+            tool = option
+            showCatalog = false
+            configureTapHandler()
+        } label: {
+            Label(option.label, systemImage: option.symbol)
+                .font(.caption.weight(.semibold))
+                .frame(maxWidth: .infinity, minHeight: 44)
+        }
+        .buttonStyle(.borderedProminent)
+        .tint(tool == option ? .mint : .indigo)
+        .accessibilityLabel("\(option.label) tool")
     }
 
     private func sheetGrabber(_ layout: CityDisplayLayout) -> some View {
@@ -260,9 +369,20 @@ struct IslandView: View {
                 Text(issue).font(.caption).foregroundStyle(.red)
                     .lineLimit(layout.scrollControls ? nil : 3)
             }
-            Text(SeasonCopy.mapLine(game.state))
-                .font(.caption2.weight(.semibold))
-                .frame(maxWidth: .infinity, alignment: .leading)
+            if hungryResidents > 0 {
+                Text("\(hungryResidents) hungry. A market in range, or more food, is what they are missing.")
+                    .font(.caption2.weight(.semibold))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            Button {
+                showCharter.toggle()
+            } label: {
+                Text(SeasonCopy.mapLine(game.state))
+                    .font(.caption2.weight(.semibold))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .buttonStyle(.plain)
+            .accessibilityHint("Shows or hides the charter card")
             if let seasonBanner {
                 Text(seasonBanner)
                     .font(.caption.weight(.bold))
@@ -431,29 +551,19 @@ struct IslandView: View {
         return "\(pending)|\(blocking)|\(island)"
     }
 
-    /// A pending crisis or an election owns the sheet. An island event may open
-    /// itself only when nothing is blocking the day.
+    /// A pending crisis or an election opens its card. An island event stays a
+    /// button so it does not cover the map or steal the build tools.
     private func presentAttention() {
         if game.state.pending != nil {
             selectedAgendaID = nil
-            sheetExpanded = true
             return
         }
         if let blocking = blockingAgendaID {
             if dismissedBlocking != blocking && selectedAgendaID != blocking {
                 selectedAgendaID = blocking
-                sheetExpanded = true
             }
             return
         }
-        openIslandEventIfNeeded()
-    }
-
-    private func openIslandEventIfNeeded() {
-        guard blockingAgendaID == nil, game.state.pending == nil else { return }
-        guard let id = liveIslandEventID, id != dismissedIslandEvent else { return }
-        selectedAgendaID = id
-        sheetExpanded = true
     }
 
     private var dayClockControls: some View {
@@ -586,7 +696,20 @@ struct IslandView: View {
                 if placementHint != hint { placementHint = hint }
             }
         }
-        scene.setPlacementKind(activeTool.buildingKind, fallbackHover: selectedTile)
+        scene.roadDrawing = activeTool == .road
+        scene.setPlacementKind(activeTool.buildingKind, fallbackHover: placeTile)
+        scene.onHoverTile = { tile in
+            Task { @MainActor in
+                if activeTool.isBuilding { placeTile = tile }
+            }
+        }
+        scene.onRoadTile = { tile in
+            Task { @MainActor in
+                guard roadDraft.last != tile, roadDraft.count < 24 else { return }
+                roadDraft.append(tile)
+                scene.setRoadPreview(roadMarks)
+            }
+        }
         scene.onTileTap = { tile in
             Task { @MainActor in
                 if activeTool == .inspect {
@@ -597,17 +720,195 @@ struct IslandView: View {
                         selectedBuildingID = nil
                         selectedTile = tile
                     }
-                } else {
-                    selectedTile = tile
-                    guard game.saveIssue == nil, let intent = activeTool.intent(at: tile) else { return }
-                    game.send(intent)
-                    if activeTool.isBuilding, game.feedback == nil {
-                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                        scene.hidePlacementGhost()
-                    }
+                } else if activeTool.isBuilding {
+                    placeTile = tile
                 }
             }
         }
+    }
+
+    /// Drops the build and catalog clock holds. A demolish confirm and Start New City
+    /// keep their own tokens. The scene object, and therefore the camera, stays.
+    private func leaveBuildSession() {
+        var hold = IslandSessionHold(
+            toolIsInspect: tool == .inspect,
+            catalogOpen: showCatalog,
+            roadDraftCount: roadDraft.count,
+            hasPlacement: placeTile != nil,
+            modalTokens: [IslandSessionHold.buildToken, IslandSessionHold.catalogToken])
+        hold.leaveIsland()
+        showCatalog = hold.catalogOpen
+        roadDraft = []
+        placeTile = nil
+        scene.setRoadPreview([])
+        scene.hidePlacementGhost()
+        if tool != .inspect {
+            tool = .inspect
+        } else {
+            scene.roadDrawing = false
+            scene.setPlacementKind(nil, fallbackHover: nil)
+        }
+    }
+
+    private var cardOpen: Bool {
+        showCharter || showCatalog || selectedAgenda != nil || game.state.pending != nil || buildingInspection != nil
+    }
+
+    private var detailOpen: Bool {
+        cardOpen || selectedTile != nil || attentionChip != nil || tool != .inspect
+    }
+
+    private var hungryResidents: Int32 {
+        game.state.districts.reduce(0) { $0 + $1.hungryCount }
+    }
+
+    private var attentionChip: AgendaItem? {
+        if game.state.pending != nil || selectedAgenda != nil { return nil }
+        if let blocking = blockingItem { return blocking }
+        if let origin = game.state.agenda.first(where: { $0.originDilemma == true }) { return origin }
+        if let id = liveIslandEventID {
+            return game.state.agenda.first { $0.id == id }
+        }
+        return nil
+    }
+
+    private var roadMarks: [(tile: TileIndex, accepted: Bool)] {
+        var spent = 0
+        return roadDraft.map { tile in
+            let map = game.state.map
+            if Int(tile.raw) < 0 || Int(tile.raw) >= map.tileCount { return (tile, false) }
+            if map.isRoad(at: tile) { return (tile, true) }
+            let open = map.terrain(at: tile).buildable && map.building(at: tile) == nil && game.state.pending == nil
+            let affordable = game.state.treasury >= Int64(spent + 10)
+            if open && affordable {
+                spent += 10
+                return (tile, true)
+            }
+            return (tile, false)
+        }
+    }
+
+    private var placeBar: some View {
+        let kind = tool.buildingKind
+        let verdict: String
+        let canPlace: Bool
+        if let kind, let placeTile {
+            switch SimulationEngine.validatePlacement(kind, at: placeTile, in: game.state) {
+            case .valid:
+                canPlace = true
+                let days = game.state.config.constructionDays(for: kind)
+                verdict = days > 0 ? "Opens in \(days) day\(days == 1 ? "" : "s")." : "Opens today."
+            case .rejected(let reason):
+                canPlace = false
+                verdict = reason.playerFacingReason
+            }
+        } else {
+            canPlace = false
+            verdict = "Move the ghost onto a site."
+        }
+        return VStack(alignment: .leading, spacing: 6) {
+            Text("\(tool.label) · $\(kind?.buildCost ?? 0)")
+                .font(.caption.weight(.semibold))
+            Text(verdict)
+                .font(.caption2)
+                .foregroundStyle(canPlace ? Color.secondary : Color.orange)
+                .fixedSize(horizontal: false, vertical: true)
+            HStack {
+                Button("Place") {
+                    guard let kind, let placeTile else { return }
+                    game.send(.placeBuilding(kind, at: placeTile))
+                    if game.feedback == nil {
+                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                        scene.hidePlacementGhost()
+                        self.placeTile = nil
+                        tool = .inspect
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(!canPlace || game.saveIssue != nil)
+                Button("Cancel") {
+                    placeTile = nil
+                    tool = .inspect
+                    scene.hidePlacementGhost()
+                }
+                .buttonStyle(.bordered)
+            }
+            .frame(minHeight: 44)
+        }
+    }
+
+    private var roadBar: some View {
+        let fresh = roadMarks.filter { $0.accepted && !game.state.map.isRoad(at: $0.tile) }.count
+        let blocked = roadMarks.contains { !$0.accepted }
+        return VStack(alignment: .leading, spacing: 6) {
+            Text(fresh > 0 ? "Pave \(fresh) · $\(fresh * 10)" : "Drag a road. Two fingers pan and pinch.")
+                .font(.caption.weight(.semibold))
+            if blocked {
+                Text("A red tile fails the road rule or the treasury. Pave stops there.")
+                    .font(.caption2)
+                    .foregroundStyle(.orange)
+            }
+            HStack {
+                Button("Pave") { paveDraft() }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(fresh == 0 || game.saveIssue != nil)
+                Button("Cancel") {
+                    roadDraft = []
+                    scene.setRoadPreview([])
+                    tool = .inspect
+                }
+                .buttonStyle(.bordered)
+            }
+            .frame(minHeight: 44)
+        }
+    }
+
+    private var catalog: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            catalogRow("Homes", [.house])
+            catalogRow("Food", [.farm, .market])
+            catalogRow("Work", [.workshop, .dock])
+            catalogRow("Services", [.clinic, .school, .police])
+            Text("Services draw their real reach. A site shows why it cannot be built.")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private func catalogRow(_ title: String, _ tools: [CityTool]) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title).font(.caption.weight(.bold))
+            HStack(spacing: 6) {
+                ForEach(tools) { option in
+                    Button {
+                        tool = option
+                        showCatalog = false
+                        configureTapHandler()
+                    } label: {
+                        Label(option.label, systemImage: option.symbol)
+                            .font(.caption.weight(.semibold))
+                            .frame(maxWidth: .infinity, minHeight: 44)
+                    }
+                    .buttonStyle(.bordered)
+                }
+            }
+        }
+    }
+
+    private func paveDraft() {
+        var rest = roadDraft
+        while let tile = rest.first {
+            game.send(.buildRoad(at: tile))
+            if game.feedback != nil {
+                roadDraft = rest
+                scene.setRoadPreview(roadMarks)
+                return
+            }
+            rest.removeFirst()
+        }
+        roadDraft = []
+        scene.setRoadPreview([])
+        tool = .inspect
     }
 }
 
@@ -622,9 +923,14 @@ private struct CityDisplayLayout {
     let controls: CGRect
     let occlusionTopInset: CGFloat
 
+    let detailOpen: Bool
+    let cardOpen: Bool
+
     init(geometry: GeometryProxy, verticalSizeClass: UserInterfaceSizeClass?,
          layoutDirection: LayoutDirection, tentMode: Bool,
-         sheetExpanded: Bool, tentControlsOpen: Bool) {
+         sheetExpanded: Bool, tentControlsOpen: Bool, detailOpen: Bool, cardOpen: Bool) {
+        self.detailOpen = detailOpen
+        self.cardOpen = cardOpen
         let size = geometry.size
         self.size = size
         let bounds = CGRect(origin: .zero, size: size)
@@ -655,27 +961,24 @@ private struct CityDisplayLayout {
                 controls = CGRect(x: 0, y: seam.maxY, width: size.width,
                                   height: max(0, size.height - seam.maxY))
             }
-        } else if size.width >= 580 && size.height >= 500 {
-            mode = .spannedFlat
-            let paneWidth = size.width / 2
-            if layoutDirection == .rightToLeft {
-                controls = CGRect(x: 0, y: 0, width: paneWidth, height: size.height)
-                focus = CGRect(x: paneWidth, y: 0, width: paneWidth, height: size.height)
-            } else {
-                focus = CGRect(x: 0, y: 0, width: paneWidth, height: size.height)
-                controls = CGRect(x: paneWidth, y: 0, width: paneWidth, height: size.height)
-            }
         } else {
+            let wide = size.width >= 700 && size.height >= 500
             let landscape = size.width > size.height &&
                 (verticalSizeClass == .compact || size.height < 500)
-            mode = landscape ? (tentMode ? .tent : .singleLandscape) : .singlePortrait
+            if wide {
+                mode = .spannedFlat
+            } else {
+                mode = landscape ? (tentMode ? .tent : .singleLandscape) : .singlePortrait
+            }
             let height: CGFloat
             if mode == .tent && !tentControlsOpen {
                 height = 72
-            } else if sheetExpanded {
-                height = size.height * 0.82
+            } else if cardOpen {
+                height = min(340, max(220, size.height * 0.40))
+            } else if detailOpen {
+                height = min(210, max(180, size.height * 0.28))
             } else {
-                height = size.height * (landscape ? 0.58 : 0.5)
+                height = min(148, max(120, size.height * 0.24))
             }
             let panelHeight = min(size.height, max(0, height))
             focus = CGRect(x: 0, y: 0, width: size.width,
@@ -697,6 +1000,12 @@ private struct CityDisplayLayout {
         }
     }
 
+    var mapFirst: Bool {
+        switch mode {
+        case .bookFold, .laptopFold: return false
+        default: return true
+        }
+    }
     var isSingleScreen: Bool {
         switch mode {
         case .singlePortrait, .singleLandscape, .tent: return true
@@ -727,7 +1036,8 @@ private struct CityDisplayLayout {
         switch mode {
         case .singlePortrait, .singleLandscape, .bookFold: tiles = 8
         case .tent: tiles = 10
-        case .spannedFlat, .laptopFold: tiles = 12
+        case .spannedFlat: tiles = 18
+        case .laptopFold: tiles = 12
         }
         return CameraFraming(viewSize: size, focusRect: focus, tileWidths: tiles)
     }

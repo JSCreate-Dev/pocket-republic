@@ -32,6 +32,11 @@ final class IslandScene: SKScene {
     private var lastHint: String?
     private let tileTick = UISelectionFeedbackGenerator()
     var onPlacementHint: ((String?) -> Void)?
+    var onHoverTile: ((TileIndex?) -> Void)?
+    var onRoadTile: ((TileIndex) -> Void)?
+    var roadDrawing = false
+    private var roadPreview: [(tile: TileIndex, accepted: Bool)] = []
+    private var inspectEntrance: TileIndex?
     private var tileTextures: [String: SKTexture] = [:]
     private var visibleRect: TileRect?
     private var animationTime: TimeInterval = 0
@@ -39,7 +44,7 @@ final class IslandScene: SKScene {
     private var cameraUserAdjusted = false
     private var framing: CameraFraming?
     private var touchStart: CGPoint?
-    private var wasDragged = false
+    private var gesture = MapGesturePolicy()
     private let selectionLayer = SKNode()
     private var selectionNodes: [Int32: SKShapeNode] = [:]
     private var selectedBuildingID: BuildingID?
@@ -143,6 +148,18 @@ final class IslandScene: SKScene {
         clampCameraToMap()
         refreshVisible(force: true)
         refreshPlacementGhost()
+        drawRoadPreview()
+        drawInspectReach()
+    }
+
+    func setRoadPreview(_ marks: [(tile: TileIndex, accepted: Bool)]) {
+        roadPreview = marks
+        if placementKind == nil { drawRoadPreview() }
+    }
+
+    func showInspectReach(from entrance: TileIndex?) {
+        inspectEntrance = entrance
+        if placementKind == nil { drawInspectReach() }
     }
 
     /// Building tool for the placement ghost. `fallbackHover` is used only until
@@ -830,6 +847,7 @@ final class IslandScene: SKScene {
             tileTick.selectionChanged()
             tileTick.prepare()
         }
+        onHoverTile?(next)
         refreshPlacementGhost()
     }
 
@@ -965,48 +983,136 @@ final class IslandScene: SKScene {
     }
 
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
-        if let touch = touches.first {
-            let location = touch.location(in: self)
-            touchStart = location
-            wasDragged = false
-            updateHover(at: location)
-        }
+        gesture.roadMode = roadDrawing
+        let fingers = fingerCount(in: event, fallback: touches)
+        gesture.began(activeFingers: fingers)
+        guard fingers < 2, let touch = touches.first else { return }
+        touchStart = touch.location(in: self)
+        updateHover(at: touchStart!)
     }
 
     override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent?) {
-        let active = (event?.allTouches ?? touches).filter { $0.phase == .moved || $0.phase == .stationary }
-        if active.count >= 2 {
+        gesture.roadMode = roadDrawing
+        let active = (event?.allTouches ?? touches).filter { $0.phase != .ended && $0.phase != .cancelled }
+        let fingers = active.count
+        if fingers >= 2 {
             let pair = Array(active.prefix(2))
             let p0 = pair[0].location(in: self), p1 = pair[1].location(in: self)
             let q0 = pair[0].previousLocation(in: self), q1 = pair[1].previousLocation(in: self)
-            let oldDistance = hypot(q0.x - q1.x, q0.y - q1.y)
-            let newDistance = hypot(p0.x - p1.x, p0.y - p1.y)
-            if newDistance > 5 {
-                cameraNode.setScale(max(0.55, min(2.6, cameraNode.xScale * oldDistance / newDistance)))
-                cameraUserAdjusted = true
-                clampCameraToMap()
-                refreshVisible()
+            let newMid = CGPoint(x: (p0.x + p1.x) / 2, y: (p0.y + p1.y) / 2)
+            let oldMid = CGPoint(x: (q0.x + q1.x) / 2, y: (q0.y + q1.y) / 2)
+            let decision = gesture.moved(
+                activeFingers: fingers,
+                panX: Double(newMid.x - oldMid.x), panY: Double(newMid.y - oldMid.y),
+                oldDistance: Double(hypot(q0.x - q1.x, q0.y - q1.y)),
+                newDistance: Double(hypot(p0.x - p1.x, p0.y - p1.y)),
+                treatAsDrag: true)
+            if case .navigate(let panX, let panY, let scaleFactor) = decision {
+                applyNavigate(panX: panX, panY: panY, scaleFactor: scaleFactor, anchor: newMid)
             }
-            wasDragged = true
-        } else if let touch = touches.first {
-            let p = touch.location(in: self), previous = touch.previousLocation(in: self)
-            cameraNode.position.x -= p.x - previous.x
-            cameraNode.position.y -= p.y - previous.y
-            cameraUserAdjusted = true
-            clampCameraToMap()
-            if let touchStart, hypot(p.x - touchStart.x, p.y - touchStart.y) > 8 { wasDragged = true }
-            refreshVisible()
+            return
         }
-        if let touch = touches.first {
-            updateHover(at: touch.location(in: self))
+        guard let touch = touches.first else { return }
+        let p = touch.location(in: self)
+        let previous = touch.previousLocation(in: self)
+        let far = touchStart.map { hypot(p.x - $0.x, p.y - $0.y) > 8 } ?? false
+        let decision = gesture.moved(
+            activeFingers: max(fingers, 1),
+            panX: Double(p.x - previous.x), panY: Double(p.y - previous.y),
+            oldDistance: 0, newDistance: 0,
+            treatAsDrag: roadDrawing || far)
+        switch decision {
+        case .roadPoint:
+            if let state = renderedState, let tile = tile(at: p, in: state.map) {
+                onRoadTile?(tile)
+            }
+        case .navigate(let panX, let panY, let scaleFactor):
+            applyNavigate(panX: panX, panY: panY, scaleFactor: scaleFactor, anchor: p)
+            updateHover(at: p)
+        case .ignore:
+            break
         }
     }
 
     override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
-        defer { touchStart = nil }
-        guard !wasDragged, let state = renderedState, let touch = touches.first,
+        finishTouch(touches, event: event, cancelled: false)
+    }
+
+    override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) {
+        finishTouch(touches, event: event, cancelled: true)
+    }
+
+    private func finishTouch(_ touches: Set<UITouch>, event: UIEvent?, cancelled: Bool) {
+        gesture.roadMode = roadDrawing
+        let remaining = fingerCount(in: event, fallback: [])
+        let wasDrag = gesture.dragged
+        let wasMulti = gesture.multiFinger
+        let roadTap = gesture.ended(remainingFingers: remaining)
+        if remaining == 0 { touchStart = nil }
+        guard !cancelled, remaining == 0, let state = renderedState, let touch = touches.first,
               let tile = tile(at: touch.location(in: self), in: state.map) else { return }
-        onTileTap?(tile)
+        if roadTap {
+            onRoadTile?(tile)
+        } else if !roadDrawing && !wasDrag && !wasMulti {
+            onTileTap?(tile)
+        }
+    }
+
+    private func fingerCount(in event: UIEvent?, fallback: Set<UITouch>) -> Int {
+        let all = event?.allTouches ?? fallback
+        return all.filter { $0.phase != .ended && $0.phase != .cancelled }.count
+    }
+
+    private func applyNavigate(panX: Double, panY: Double, scaleFactor: Double?, anchor: CGPoint) {
+        let nudged = MapCameraNudge.applying(
+            x: Double(cameraNode.position.x), y: Double(cameraNode.position.y),
+            scale: Double(cameraNode.xScale),
+            panX: panX, panY: panY,
+            anchorX: Double(anchor.x), anchorY: Double(anchor.y),
+            scaleFactor: scaleFactor)
+        cameraNode.position = CGPoint(x: nudged.x, y: nudged.y)
+        cameraNode.setScale(nudged.scale)
+        cameraUserAdjusted = true
+        clampCameraToMap()
+        refreshVisible()
+    }
+
+    private func drawRoadPreview() {
+        guard placementKind == nil, let map = renderedState?.map else { return }
+        ghostLayer.removeAllChildren()
+        guard !roadPreview.isEmpty else { return }
+        let markerSize = CGSize(width: halfWidth * 2, height: halfHeight * 2)
+        let markerTexture = BuildingArtwork.tileMarkerTexture(size: markerSize)
+        for mark in roadPreview {
+            let node = SKSpriteNode(texture: markerTexture, size: markerSize)
+            node.color = mark.accepted
+                ? UIColor(red: 0.25, green: 0.55, blue: 0.95, alpha: 1)
+                : UIColor(red: 0.90, green: 0.22, blue: 0.20, alpha: 1)
+            node.colorBlendFactor = 0.9
+            node.alpha = 0.55
+            node.position = point(for: mark.tile, in: map)
+            ghostLayer.addChild(node)
+        }
+    }
+
+    private func drawInspectReach() {
+        guard placementKind == nil, let entrance = inspectEntrance, let state = renderedState else {
+            if placementKind == nil { reachLayer.removeAllChildren() }
+            return
+        }
+        reachLayer.removeAllChildren()
+        let map = state.map
+        let markerSize = CGSize(width: halfWidth * 2, height: halfHeight * 2)
+        let markerTexture = BuildingArtwork.tileMarkerTexture(size: markerSize)
+        let reach = ServiceReach.tiles(from: entrance, maxDistance: state.config.maxServiceDistance, on: map)
+        for tile in reach {
+            let node = SKSpriteNode(texture: markerTexture, size: markerSize)
+            node.color = UIColor(red: 0.98, green: 0.78, blue: 0.22, alpha: 1)
+            node.colorBlendFactor = 1
+            node.alpha = 0.30
+            node.position = point(for: tile, in: map)
+            reachLayer.addChild(node)
+        }
     }
 }
 

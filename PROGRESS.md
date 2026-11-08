@@ -12,7 +12,7 @@ Jordan wants Pocket Republic to feel like a lively, living world with a real gam
 
 ## Current state
 
-Code snapshot: this progression branch, cut from main `744e692` (PR #28, squash-merged). That main **Build iOS IPA** passed: [run 42430947948](https://github.com/JSCreate-Dev/pocket-republic/actions/runs/42430947948), **105 tests, 0 failures**. PR #26 at `8c4accd` drew construction. PR #27 at `6278c09` stopped demolished buildings from acting, set a new city's market cap to 21, and dealt six island events. No iPhone or simulator run is claimed for this branch until CI and the scripted season playthrough below.
+Code snapshot: map-first controls, cut from main `1bab3cf` (PR #29, the season and three origins). That main **Build iOS IPA** passed: [run 42441190337](https://github.com/JSCreate-Dev/pocket-republic/actions/runs/42441190337), **116 tests, 0 failures** (199.854 seconds). The unsigned IPA is artifact `13601748346` (`PocketRepublic-unsigned-ipa`, 5,453,632 bytes, expires 2027-02-06T03:05:02Z). Signed upload was skipped. This branch does not change the simulation. No iPhone run is claimed for the new controls.
 
 PR #24 remains the construction clock in the core: foundation, scaffold, complete, in whole sim-days. PR #26 draws those stages. PR #27 did not retune build times. A demolished building is no longer a ghost workplace: `isStanding(on:)` is the economy gate, and `visibleBuildings` omits rubble. Sites still draw, because they own their tiles.
 
@@ -76,7 +76,15 @@ The inspect panel keeps the core's status string and paints it as a timber banne
 
 ### Duo layout, decrees, and citizens (this branch)
 
-Closed portrait and landscape keep the map full width. Controls sit in a bottom sheet, half height until the grabber is dragged or tapped, with **Next Day** pinned under the scrolling tools and inspect card. A wide flat window splits into map and control panes. Book and laptop folds still follow `reservedRegions` on iOS 27.1. Outer landscape can switch to a map-first tent dock; the scene cannot tell that posture from ordinary landscape, so the player chooses it. This is PR #25's layout, with the grabber and Next Day kept outside the scroll so the closed screen stays playable. Footprints, road overlays, building anchors, and walker routes are the same scene as main.
+Phone and a wide flat window (the iPad case that used to split 50/50) keep the map full width. A short dock holds Inspect, Build, Road, pause, and Next Day. A decision, the catalog, or an inspect card opens above that dock and scrolls. It does not take a blank half of the screen. Book and laptop folds still follow `reservedRegions` on iOS 27.1, and that pane packs from the top. Outer landscape can still switch to a tent dock. Footprints, road overlays, building anchors, and walker routes are the same scene.
+
+### Map-first building (this branch)
+
+Build opens a catalog grouped as Homes, Food, Work, and Services. Choosing one shows the existing footprint ghost, the price, and `validatePlacement`'s reason. Place sends `placeBuilding`. Cancel leaves the map. Services draw `ServiceReach` from `maxServiceDistance`. A finished service building draws that same reach; a site does not pretend it is open.
+
+Road is a mode. One finger adds up to 24 tiles. Two fingers pan and pinch together: the midpoint follows the same camera delta as one finger, then the pinch stays on that midpoint. A second finger latches the gesture so lifting one finger does not add a road tile. Pave sends `buildRoad` in order at $10 a tile and stops on the first rejection. The core is still one tile at a time. Leaving the Island tab returns the tool to Inspect, clears the draft and the ghost, and releases only the build and catalog clock holds.
+
+The charter is one line on the HUD (tap it for the card). Hungry residents, when the districts report any, are named from `hungryCount`. An election or other crisis still opens on the island and blocks the day. An island event or origin dilemma is a button, not a card that covers the map. The live clock still pauses while that event is waiting, while a crisis blocks, and while Build, Road, or the catalog is up. People, Govern, and the Gazette stay tabs. Start New City is unchanged.
 
 People are cards (hungry first, initials portrait, happiness, money, hunger). Govern shows decree cards from `DecreeCatalogue` and `AgendaEffect`: title, cost or Free, "Need N more", faction arrows, and the effect lines the spec already stores. **Issue decree** sends the enact option. **Not now** only closes the card, because the core's dismiss option would remove the offer and emit `decreeIssued`. There is no decree flavor line: `DecreeSpec` has no `flavor` field.
 
