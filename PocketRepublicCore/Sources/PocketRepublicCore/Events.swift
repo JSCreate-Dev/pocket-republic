@@ -28,6 +28,8 @@ public enum EventKind: String, Codable, Sendable {
     /// the headline (and, once answered, the choice), which is what the Events
     /// list already prints.
     case islandEvent
+    /// Founding charter, a development compact, or the settled republic.
+    case republicSeason
 }
 
 /// Where an event happened. Required for anything district-scoped: "unrest rose" is

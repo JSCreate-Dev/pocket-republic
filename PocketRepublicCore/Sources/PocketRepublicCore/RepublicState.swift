@@ -55,6 +55,8 @@ public struct RepublicState: Codable, Sendable {
     /// before the deck has no key here; decoding leaves it nil and the checksum,
     /// which re-encodes the state, still matches.
     public var islandEventLog: IslandEventLog?
+    /// Nil on a city saved before the season. Claiming writes it once.
+    public var republicSeason: RepublicSeason?
 
     /// A day-advance is blocked only by genuine crises, not by the standing agenda.
     public var blocksAdvance: Bool {
