@@ -781,7 +781,7 @@ struct IslandView: View {
                 .font(.caption.weight(.semibold))
             Text(verdict)
                 .font(.caption2)
-                .foregroundStyle(canPlace ? .secondary : .orange)
+                .foregroundStyle(canPlace ? Color.secondary : Color.orange)
                 .fixedSize(horizontal: false, vertical: true)
             HStack {
                 Button("Place") {
