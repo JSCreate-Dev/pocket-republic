@@ -15,6 +15,9 @@ public enum PlayerIntent: Sendable, Equatable {
     /// Answer anything on the standing agenda: a faction demand, an advisory, a
     /// decree, a placement commission or an election.
     case resolveAgendaItem(DecisionID, option: Int32)
+    /// Founding charter, one development compact, or the settled republic.
+    /// Each step pays or grants at most once.
+    case advanceSeason(SeasonStep)
 }
 
 public enum IntentRejection: String, Sendable, Equatable {
@@ -25,6 +28,10 @@ public enum IntentRejection: String, Sendable, Equatable {
     case noSuchAgendaItem
     case crisisPendingBlocksBuilding
     case operatingModeNotOffered
+    case seasonNotReady
+    case seasonAlreadyClaimed
+    case seasonFoundingRequired
+    case seasonPathTaken
 }
 
 public enum IntentResult: Sendable, Equatable {
@@ -143,6 +150,9 @@ extension SimulationEngine {
                        location: item.location, causes: item.causes, magnitude: option)
             }
             return .accepted
+
+        case .advanceSeason(let step):
+            return RepublicSeasonBook.apply(step, to: &s)
 
         case .resolveDecision(let did, let option):
             guard let pending = s.pending else { return .rejected(.noPendingDecision) }

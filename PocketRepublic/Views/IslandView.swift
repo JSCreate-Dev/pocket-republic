@@ -21,6 +21,8 @@ struct IslandView: View {
     @State private var tentControlsOpen = false
     @State private var dismissedIslandEvent: DecisionID?
     @State private var dismissedBlocking: DecisionID?
+    @State private var seenSeason: String?
+    @State private var seasonBanner: String?
 
     var body: some View {
         GeometryReader { geometry in
@@ -82,6 +84,7 @@ struct IslandView: View {
                 scene.setSelection(selectedBuildingID)
                 configureTapHandler()
                 presentAttention()
+                if seenSeason == nil { seenSeason = seasonSignature }
             }
             .sensoryFeedback(.selection, trigger: selectedBuildingID) { _, newValue in
                 newValue != nil
@@ -109,10 +112,18 @@ struct IslandView: View {
         .onChange(of: attentionCue) { _, _ in
             presentAttention()
         }
+        .onChange(of: seasonSignature) { _, newValue in
+            let previous = seenSeason
+            seenSeason = newValue
+            guard previous != nil, previous != newValue else { return }
+            seasonBanner = SeasonCopy.celebration(game.state)
+            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+        }
     }
 
     @ViewBuilder private func controls(in layout: CityDisplayLayout) -> some View {
         let scrolling = VStack(spacing: 8) {
+            SeasonCard()
             if game.state.pending == nil && selectedAgenda == nil {
                 agendaPreviews(layout: layout)
             } else if game.state.pending == nil, let blocking = blockingItem, selectedAgenda?.id != blocking.id {
@@ -249,6 +260,15 @@ struct IslandView: View {
                 Text(issue).font(.caption).foregroundStyle(.red)
                     .lineLimit(layout.scrollControls ? nil : 3)
             }
+            Text(SeasonCopy.mapLine(game.state))
+                .font(.caption2.weight(.semibold))
+                .frame(maxWidth: .infinity, alignment: .leading)
+            if let seasonBanner {
+                Text(seasonBanner)
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(Color(red: 0.45, green: 0.28, blue: 0.08))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
             Text(clock.policy.controlLabel)
                 .font(.caption2.weight(.semibold))
                 .foregroundStyle(.secondary)
@@ -281,7 +301,8 @@ struct IslandView: View {
     /// A choice that blocks the day outranks an island event. On a one-card
     /// phone sheet the first rank is the only button, so the election stays reachable.
     private func previewRank(_ item: AgendaItem) -> Int {
-        AgendaSheetOrder.rank(tier: item.tier, isIslandEvent: item.islandEventID != nil, isDecree: item.kind == .decree)
+        AgendaSheetOrder.rank(tier: item.tier, isIslandEvent: item.islandEventID != nil,
+                              isDecree: item.kind == .decree, isOriginDilemma: item.originDilemma == true)
     }
 
     @ViewBuilder private func agendaPreviews(layout: CityDisplayLayout) -> some View {
@@ -321,6 +342,7 @@ struct IslandView: View {
 
     private func previewTitle(_ item: AgendaItem) -> String {
         if item.tier == .crisis { return "\(item.kind.cityTitle) · day is waiting" }
+        if item.originDilemma == true { return item.causes.first?.detail ?? "Opening" }
         return item.islandEvent?.title ?? item.kind.cityTitle
     }
 
@@ -383,6 +405,11 @@ struct IslandView: View {
             }
         )
         .frame(maxWidth: layout.cardWidth, alignment: .leading)
+    }
+
+    private var seasonSignature: String {
+        let season = game.state.republicSeason
+        return "\(season?.foundingClaimed == true)|\(season?.path?.rawValue ?? "")|\(season?.settledClaimed == true)"
     }
 
     private var blockingItem: AgendaItem? {

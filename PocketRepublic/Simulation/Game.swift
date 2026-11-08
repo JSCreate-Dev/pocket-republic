@@ -71,7 +71,7 @@ import PocketRepublicCore
         save()
     }
 
-    func startNewCity() {
+    func startNewCity(origin: RepublicOrigin? = nil) {
         guard let saveURL else {
             saveIssue = "City storage is unavailable on this device."
             return
@@ -80,7 +80,7 @@ import PocketRepublicCore
             if FileManager.default.fileExists(atPath: saveURL.path) {
                 try FileManager.default.removeItem(at: saveURL)
             }
-            state = Self.freshState()
+            state = Self.freshState(origin: origin)
             saveIssue = nil
             feedback = nil
             save()
@@ -106,8 +106,8 @@ import PocketRepublicCore
         }
     }
 
-    private static func freshState() -> RepublicState {
-        WorldGenerator.generate(seed: UInt64.random(in: UInt64.min...UInt64.max))
+    private static func freshState(origin: RepublicOrigin? = nil) -> RepublicState {
+        WorldGenerator.generate(seed: UInt64.random(in: UInt64.min...UInt64.max), origin: origin)
     }
 
     private static func isValid(_ saved: RepublicState) -> Bool {

@@ -91,12 +91,14 @@ public struct AgendaItem: Codable, Sendable, Identifiable, Equatable {
     /// Presentation looks up `EventDeck.spec(_:)`. Nil on every other row, and
     /// omitted from saves that predate the deck.
     public let islandEventID: Int32?
+    /// Set on the one opening card for a chosen origin. Nil on every other row.
+    public let originDilemma: Bool?
 
     public init(id: DecisionID, kind: AgendaKind, tier: AgendaTier, raisedOnDay: Int32,
                 expiresOnDay: Int32?, faction: FactionKind?, location: EventLocation,
                 causes: [CauseFactor], options: [AgendaOption],
                 ignoreCost: Int32 = 0, salience: Int32 = 0,
-                islandEventID: Int32? = nil) {
+                islandEventID: Int32? = nil, originDilemma: Bool? = nil) {
         self.id = id
         self.kind = kind
         self.tier = tier
@@ -109,6 +111,7 @@ public struct AgendaItem: Codable, Sendable, Identifiable, Equatable {
         self.ignoreCost = ignoreCost
         self.salience = salience
         self.islandEventID = islandEventID
+        self.originDilemma = originDilemma
     }
 
     /// The catalogue entry for an island-event row, if the deck still has it.

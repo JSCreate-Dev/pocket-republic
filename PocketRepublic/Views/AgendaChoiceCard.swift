@@ -266,6 +266,23 @@ private struct Reading {
                     isLapse: option.id == spec.ifIgnored
                 )
             }
+        } else if item.originDilemma == true {
+            isIslandEvent = false
+            title = item.causes.first?.detail ?? "An opening"
+            headline = nil
+            flavor = item.causes.dropFirst().first?.detail
+            why = "Letting it expire changes nothing. Either choice is final."
+            because = []
+            toneLabel = nil
+            toneColor = RepublicTheme.ink
+            expiry = item.expiresOnDay.map { "Open through day \($0)." }
+            options = item.options.map { option in
+                let cost = option.effect.treasuryCost
+                let shortfall: Int64? = cost > treasury ? cost - treasury : nil
+                return Option(id: option.id, label: option.label, outcome: nil,
+                              effects: AgendaEffectCopy.lines(option.effect, includeTreasury: true),
+                              shortfall: shortfall, canAfford: shortfall == nil, isLapse: false)
+            }
         } else {
             isIslandEvent = false
             title = item.kind.spokenTitle

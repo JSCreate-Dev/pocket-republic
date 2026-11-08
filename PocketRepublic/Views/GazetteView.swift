@@ -258,6 +258,9 @@ enum GazetteReading {
         case .islandEvent:
             headline = event.causes.first?.detail ?? "An island event"
             tone = .plain
+        case .republicSeason:
+            headline = event.causes.first?.detail ?? "The republic marked the season"
+            tone = .good
         }
         let because = event.causes.compactMap(CauseSpeech.line).first
         let named = names.map { "\($0). " } ?? ""

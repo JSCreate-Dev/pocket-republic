@@ -157,12 +157,15 @@ public enum SimulationEngine {
                 }
                 let bonus = !covered.isEmpty && fertile * 2 >= covered.count
                     ? s.config.fertileBonus : 0
-                let yield = Int64(workers * (s.config.farmYieldPerWorker + bonus)) * scale / 100
+                let extra = RepublicSeasonBook.granaryFoodPerWorker
+                let foodBonus: Int32 = s.republicSeason?.path == .granary ? extra : 0
+                let yield = Int64(workers * (s.config.farmYieldPerWorker + bonus + foodBonus)) * scale / 100
                 s.produceFood(at: b.id, Int32(yield))
             case .workshop, .dock:
                 // Exports: the only money entering the island, and it is recorded.
-                s.transfer(from: .external, to: .building(b.id),
-                           Int64(workers) * s.config.workshopOutputPerWorker * scale / 100)
+                let base = Int64(workers) * s.config.workshopOutputPerWorker * scale / 100
+                let bonus = RepublicOriginBook.exportAdjustment(workers: workers, scale: scale, in: s)
+                s.transfer(from: .external, to: .building(b.id), max(0, base + bonus))
             default:
                 break
             }
@@ -428,7 +431,8 @@ public enum SimulationEngine {
     static func payUpkeep(_ s: inout RepublicState) {
         var total: Int64 = 0
         for b in s.buildings where b.kind != .house && b.isStanding(on: s.map) {
-            total += b.kind.isCivic ? s.config.upkeepCivic : s.config.upkeepPrivate
+            total += b.kind.isCivic ? RepublicOriginBook.civicUpkeep(in: s) : s.config.upkeepPrivate
+            total += RepublicSeasonBook.granaryUpkeepSurcharge(for: b, in: s)
         }
         let paid = s.transfer(from: .treasury, to: .external, total)
         if paid < total {
@@ -441,7 +445,7 @@ public enum SimulationEngine {
 
     static func spoil(_ s: inout RepublicState) {
         for i in s.buildings.indices where s.buildings[i].kind.storesFood && s.buildings[i].isStanding(on: s.map) {
-            let lost = s.buildings[i].foodStore * s.config.marketSpoilagePercent / 100
+            let lost = s.buildings[i].foodStore * RepublicSeasonBook.spoilagePercent(in: s) / 100
             if lost > 0 { s.spoilFood(at: s.buildings[i].id, lost) }
         }
     }
@@ -506,8 +510,9 @@ public enum SimulationEngine {
                 d.happiness += cfg.schoolCoverageBonus
             }
             if c.work == nil {
-                d.happiness -= cfg.unemploymentPenalty
-                d.loyalty -= cfg.unemploymentPenalty / 2
+                let penalty = RepublicSeasonBook.unemploymentPenalty(in: s)
+                d.happiness -= penalty
+                d.loyalty -= penalty / 2
                 d.causes.append(CauseFactor(.unemployment, value: c.daysUnemployed, detail: district.name))
                 grievance = true
             }

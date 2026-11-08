@@ -124,6 +124,10 @@ extension IntentRejection {
             return "That decision is no longer available."
         case .crisisPendingBlocksBuilding: return "Resolve the crisis before building."
         case .operatingModeNotOffered: return "That building has no operating mode."
+        case .seasonNotReady: return "That step of the season is not ready yet."
+        case .seasonAlreadyClaimed: return "That season reward was already taken."
+        case .seasonFoundingRequired: return "Seal the charter before choosing a compact."
+        case .seasonPathTaken: return "The other compact is already in force."
         }
     }
 }

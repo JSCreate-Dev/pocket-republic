@@ -21,7 +21,8 @@ public enum WorldGenerator {
     public static func generate(seed: UInt64,
                                 citizenCount: Int = 120,
                                 size: Int32 = 64,
-                                config: BalanceConfig = BalanceConfig()) -> RepublicState {
+                                config: BalanceConfig = BalanceConfig(),
+                                origin: RepublicOrigin? = nil) -> RepublicState {
         var map = WorldMap(width: size, height: size)
         var rng = SeededRNG(seed: seed ^ 0xA5A5_1234_DEAD_BEEF)
 
@@ -158,6 +159,7 @@ public enum WorldGenerator {
 
         state.rng = SeededRNG(seed: seed)
         state.fields.markDirty()
+        RepublicOriginBook.stamp(origin, on: &state)
         return state
     }
 
