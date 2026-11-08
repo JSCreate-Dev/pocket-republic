@@ -7,6 +7,8 @@ public struct BalanceConfig: Codable, Sendable, Equatable {
     /// Missing on older saves and explicit population fixtures: no automatic arrivals.
     public var settlementGrowth: SettlementGrowthConfig? = nil
 
+    public var developmentRules: DevelopmentRules? = nil
+
     // Production
     public var farmYieldPerWorker: Int32 = 5
     public var fertileBonus: Int32 = 2

@@ -26,8 +26,13 @@ struct IslandView: View {
     @State private var seasonBanner: String?
     @State private var showCatalog = false
     @State private var showCharter = false
+    @State private var showRoadmap = false
+    @State private var unlockedBanner: DevelopmentUnlock?
     @State private var placeTile: TileIndex?
     @State private var roadDraft: [TileIndex] = []
+    @State private var placementReceipt: PlacementReceipt?
+    @State private var roadReceipt: RoadReceipt?
+    @State private var mapOverlay: MapOverlayMode = .standard
 
     var body: some View {
         GeometryReader { geometry in
@@ -90,6 +95,7 @@ struct IslandView: View {
                 scene.scaleMode = .resizeFill
                 scene.setFraming(layout.framing)
                 scene.render(game.state)
+                scene.setOverlay(mapOverlay)
                 scene.setSelection(selectedBuildingID)
                 configureTapHandler()
                 presentAttention()
@@ -103,6 +109,9 @@ struct IslandView: View {
             }
         }
         .onReceive(game.$state) { state in
+            if let receipt = placementReceipt, state.map.buildingAt(receipt.anchor) != receipt.id {
+                placementReceipt = nil
+            }
             if let selectedBuildingID,
                BuildingHitTest.occupiedTiles(selectedBuildingID, on: state.map).isEmpty {
                 self.selectedBuildingID = nil
@@ -112,8 +121,22 @@ struct IslandView: View {
                 self.selectedAgendaID = nil
             }
         }
+        .onChange(of: game.state.worldSeed) { _, _ in
+            showRoadmap = false
+            unlockedBanner = nil
+            placementReceipt = nil
+            roadReceipt = nil
+            selectedBuildingID = nil
+            selectedTile = nil
+        }
+        .onChange(of: mapOverlay) { _, mode in
+            scene.setOverlay(mode)
+        }
         .onChange(of: tool) { _, newTool in
-            if newTool != .inspect { selectedBuildingID = nil }
+            if newTool != .inspect {
+                selectedBuildingID = nil
+                scene.setSelection(nil)
+            }
             if newTool != .road {
                 roadDraft = []
                 scene.setRoadPreview([])
@@ -122,6 +145,15 @@ struct IslandView: View {
             if newTool != .inspect { showCatalog = false }
             clock.setModal(IslandSessionHold.buildToken, presented: newTool != .inspect)
             configureTapHandler()
+        }
+        .onChange(of: showRoadmap) { _, shown in
+            clock.setModal("roadmap", presented: shown)
+        }
+        .onChange(of: game.state.development?.unlocked ?? []) { old, new in
+            guard let earned = new.last(where: { !old.contains($0) }) else { return }
+            unlockedBanner = earned
+            UINotificationFeedbackGenerator().notificationOccurred(.success)
+            UIAccessibility.post(notification: .announcement, argument: "Unlocked \(earned.title). \(earned.reward)")
         }
         .onChange(of: showCatalog) { _, shown in
             clock.setModal(IslandSessionHold.catalogToken, presented: shown)
@@ -154,6 +186,13 @@ struct IslandView: View {
 
     @ViewBuilder private func controls(in layout: CityDisplayLayout) -> some View {
         let scrolling = VStack(spacing: 8) {
+            if showRoadmap {
+                DevelopmentRoadmap().frame(maxWidth: layout.cardWidth)
+                Button("Founding charter & compacts") { showCharter.toggle() }
+                    .font(.caption.weight(.semibold)).frame(minHeight: 44)
+                Button("Close roadmap") { showRoadmap = false }
+                    .font(.caption).frame(minHeight: 44)
+            }
             if showCharter { SeasonCard() }
             if let chip = attentionChip {
                 Button {
@@ -179,6 +218,11 @@ struct IslandView: View {
                 catalog
             } else {
                 if let inspection = buildingInspection {
+                    if let building = selectedBuilding, mapOverlay != .standard {
+                        Text(String(overlayTileDescription(building.anchor).dropFirst(3)))
+                            .font(.caption.weight(.semibold))
+                            .padding(.horizontal, 8)
+                    }
                     BuildingInspectPanel(
                         inspection: inspection,
                         underConstruction: selectedBuilding?.isUnderConstruction == true,
@@ -194,7 +238,7 @@ struct IslandView: View {
                 } else if let selectedTile {
                     let x = game.state.map.x(of: selectedTile)
                     let y = game.state.map.y(of: selectedTile)
-                    Text("Tile \(x), \(y) · \(terrainLabel(at: selectedTile))")
+                    Text("Tile \(x), \(y) · \(terrainLabel(at: selectedTile))\(overlayTileDescription(selectedTile))")
                         .font(.caption)
                         .padding(.horizontal, 10)
                         .padding(.vertical, 5)
@@ -359,20 +403,48 @@ struct IslandView: View {
 
     private func status(in layout: CityDisplayLayout) -> some View {
         VStack(alignment: .leading, spacing: 7) {
-            ViewThatFits(in: .horizontal) {
-                HStack(spacing: 14) {
-                    dayPopulation
-                    resourceStrip
+            HStack(alignment: .top, spacing: 8) {
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 14) {
+                        dayPopulation
+                        resourceStrip
+                    }
+                    VStack(alignment: .leading, spacing: 7) {
+                        dayPopulation
+                        resourceStrip
+                    }
                 }
-                VStack(alignment: .leading, spacing: 7) {
-                    dayPopulation
-                    resourceStrip
+                Spacer(minLength: 0)
+                Menu {
+                    Picker("Map layer", selection: $mapOverlay) {
+                        ForEach(MapOverlayMode.allCases) { mode in
+                            Label(mode.title, systemImage: mode.symbol).tag(mode)
+                        }
+                    }
+                } label: {
+                    Image(systemName: mapOverlay == .standard ? "square.3.layers.3d" : mapOverlay.symbol)
+                        .foregroundStyle(RepublicTheme.brass)
+                        .frame(width: 44, height: 44)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Map layers: \(mapOverlay.title)")
+                .accessibilityHint("Switches fertility, happiness, food access and job overlays")
+            }
+            if mapOverlay != .standard {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(mapOverlay.title).font(.caption.weight(.bold)).foregroundStyle(RepublicTheme.brass)
+                    Text(mapOverlay.legend).font(.caption2).fixedSize(horizontal: false, vertical: true)
+                    Text("Tap a tile to inspect its layer value. Layers never change the simulation.")
+                        .font(.caption2).foregroundStyle(RepublicTheme.paper.opacity(0.7))
                 }
             }
-            Button { showCharter.toggle() } label: {
+            Button {
+                if DevelopmentTree.isEnabled(in: game.state) { showRoadmap.toggle() }
+                else { showCharter.toggle() }
+            } label: {
                 HStack(spacing: 6) {
                     Image(systemName: "flag.fill").foregroundStyle(RepublicTheme.brass)
-                    Text(SeasonCopy.mapLine(game.state)).lineLimit(1)
+                    Text(roadmapLine).lineLimit(2)
                     Spacer(minLength: 0)
                     Image(systemName: "chevron.right").font(.caption2)
                 }
@@ -381,7 +453,7 @@ struct IslandView: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .accessibilityHint("Shows or hides the charter card")
+            .accessibilityHint("Opens your next development goal and its requirements")
             if let issue = game.saveIssue {
                 Text(issue).font(.caption).foregroundStyle(.red)
             } else if let hint = tool.isBuilding ? placementHint : game.feedback {
@@ -390,7 +462,7 @@ struct IslandView: View {
                 Label("\(hungryResidents) hungry · check market access and food", systemImage: "exclamationmark.triangle.fill")
                     .font(.caption2.weight(.semibold)).foregroundStyle(RepublicTheme.sand)
             }
-            if game.saveIssue == nil && game.feedback == nil && !tool.isBuilding && hungryResidents == 0 {
+            if mapOverlay == .standard && game.saveIssue == nil && game.feedback == nil && !tool.isBuilding && hungryResidents == 0 {
                 Text(developmentHint)
                     .font(.caption2).foregroundStyle(RepublicTheme.paper.opacity(0.72))
                     .lineLimit(2)
@@ -398,12 +470,112 @@ struct IslandView: View {
             if let seasonBanner {
                 Text(seasonBanner).font(.caption.weight(.bold)).foregroundStyle(RepublicTheme.brass)
             }
+            if let receipt = placementReceipt, tool == .inspect { placementConfirmation(receipt) }
+            if let receipt = roadReceipt { roadConfirmation(receipt) }
+            if let unlocked = unlockedBanner {
+                HStack {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("Unlocked: \(unlocked.title)").font(.caption.weight(.bold))
+                        Text(unlocked.reward).font(.caption2)
+                    }
+                    Spacer(minLength: 0)
+                    Button { showRoadmap = true } label: {
+                        Text("View").font(.caption.weight(.semibold)).frame(minWidth: 44, minHeight: 44)
+                    }.buttonStyle(.plain)
+                    Button { unlockedBanner = nil } label: {
+                        Image(systemName: "xmark").frame(width: 44, height: 44)
+                    }.buttonStyle(.plain).accessibilityLabel("Dismiss unlock announcement")
+                }
+                .padding(8)
+                .background(RepublicTheme.brass.opacity(0.15), in: RoundedRectangle(cornerRadius: 10))
+            }
         }
         .foregroundStyle(RepublicTheme.paper)
         .padding(.horizontal, 12).padding(.vertical, 9)
         .background(RepublicTheme.panel.opacity(0.94), in: RoundedRectangle(cornerRadius: 12))
         .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(RepublicTheme.brass.opacity(0.22)))
         .shadow(color: .black.opacity(0.2), radius: 8, y: 3)
+    }
+
+    private func overlayTileDescription(_ tile: TileIndex) -> String {
+        guard mapOverlay != .standard else { return "" }
+        guard let score = MapOverlaySnapshot(mode: mapOverlay, state: game.state).value(at: tile) else {
+            return " · \(mapOverlay.title): no data"
+        }
+        switch mapOverlay {
+        case .standard: return ""
+        case .fertility: return score == 100 ? " · Fertile soil" : " · Not fertile"
+        case .foodAccess:
+            return score == 100 ? " · Stocked market in reach" : (score > 0 ? " · Market in reach, empty" : " · No market access")
+        case .happiness: return " · District happiness \(score)/100"
+        case .employment: return " · District employment \(score)%"
+        }
+    }
+
+    private var roadmapLine: String {
+        guard DevelopmentTree.isEnabled(in: game.state) else { return SeasonCopy.mapLine(game.state) }
+        if let goal = DevelopmentTree.nextGoal(in: game.state) { return "Next unlock: \(goal.id.title)" }
+        return "Roadmap complete · Your republic is growing"
+    }
+
+    private func roadConfirmation(_ receipt: RoadReceipt) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: receipt.complete ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+                .foregroundStyle(RepublicTheme.brass)
+            VStack(alignment: .leading, spacing: 3) {
+                Text("\(receipt.count) road tiles paved\(receipt.complete ? "" : " · stopped early")")
+                    .font(.caption.weight(.bold))
+                Text("−$\(receipt.cost) · \(game.saveIssue == nil ? "Saved on this device" : "Not saved — see storage warning")")
+                    .font(.caption2)
+            }
+            Spacer(minLength: 0)
+            Button {
+                scene.focus(on: receipt.anchor)
+            } label: {
+                Image(systemName: "scope").frame(width: 44, height: 44)
+            }.buttonStyle(.plain).accessibilityLabel("View paved road")
+            Button { roadReceipt = nil } label: {
+                Image(systemName: "xmark").frame(width: 44, height: 44)
+            }.buttonStyle(.plain).accessibilityLabel("Dismiss road confirmation")
+        }
+        .padding(8)
+        .background(RepublicTheme.brass.opacity(0.12), in: RoundedRectangle(cornerRadius: 10))
+    }
+
+    private func placementConfirmation(_ receipt: PlacementReceipt) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(alignment: .top, spacing: 8) {
+                Image(systemName: game.saveIssue == nil ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+                    .foregroundStyle(RepublicTheme.brass)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("\(receipt.name) \(receipt.buildDays > 0 ? "construction started" : "placed")")
+                        .font(.caption.weight(.bold))
+                    Text("−$\(receipt.cost) · \(receipt.opensOnDay > game.state.day ? "Opens day \(receipt.opensOnDay)" : "Now open")")
+                        .font(.caption2)
+                    Text(game.saveIssue == nil ? "Saved on this device" : "Placed, but could not save. See the storage warning.")
+                        .font(.caption2).foregroundStyle(RepublicTheme.paper.opacity(0.8))
+                }
+                Spacer(minLength: 0)
+                Button { placementReceipt = nil } label: {
+                    Image(systemName: "xmark").frame(width: 44, height: 44)
+                }
+                .buttonStyle(.plain).accessibilityLabel("Dismiss placement confirmation")
+            }
+            Button {
+                tool = .inspect
+                selectedTile = nil
+                selectedBuildingID = receipt.id
+                scene.setSelection(receipt.id)
+                scene.focus(on: receipt.anchor)
+            } label: {
+                Label("View construction site", systemImage: "scope")
+                    .font(.caption.weight(.semibold)).frame(minHeight: 44)
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(8)
+        .background(RepublicTheme.brass.opacity(0.12), in: RoundedRectangle(cornerRadius: 10))
+        .accessibilityElement(children: .contain)
     }
 
     private var developmentHint: String {
@@ -739,6 +911,7 @@ struct IslandView: View {
         scene.setPlacementKind(activeTool.buildingKind, fallbackHover: placeTile)
         scene.onHoverTile = { tile in
             Task { @MainActor in
+                guard tool == activeTool, islandVisible else { return }
                 if activeTool.isBuilding { placeTile = tile }
             }
         }
@@ -751,12 +924,14 @@ struct IslandView: View {
         }
         scene.onTileTap = { tile in
             Task { @MainActor in
+                guard tool == activeTool, islandVisible else { return }
                 if activeTool == .inspect {
                     if let building = BuildingHitTest.building(on: tile, in: game.state) {
                         selectedBuildingID = building.id
                         selectedTile = nil
                     } else {
                         selectedBuildingID = nil
+                        scene.setSelection(nil)
                         selectedTile = tile
                     }
                 } else if activeTool.isBuilding {
@@ -769,6 +944,8 @@ struct IslandView: View {
     /// Drops the build and catalog clock holds. A demolish confirm and Start New City
     /// keep their own tokens. The scene object, and therefore the camera, stays.
     private func leaveBuildSession() {
+        showRoadmap = false
+        clock.setModal("roadmap", presented: false)
         var hold = IslandSessionHold(
             toolIsInspect: tool == .inspect,
             catalogOpen: showCatalog,
@@ -790,7 +967,7 @@ struct IslandView: View {
     }
 
     private var cardOpen: Bool {
-        showCharter || showCatalog || selectedAgenda != nil || game.state.pending != nil || buildingInspection != nil
+        showRoadmap || showCharter || showCatalog || selectedAgenda != nil || game.state.pending != nil || buildingInspection != nil
     }
 
     private var detailOpen: Bool {
@@ -839,11 +1016,11 @@ struct IslandView: View {
                 verdict = days > 0 ? "Opens in \(days) day\(days == 1 ? "" : "s")." : "Opens today."
             case .rejected(let reason):
                 canPlace = false
-                verdict = reason.playerFacingReason
+                verdict = DevelopmentTree.lockReason(for: kind, in: game.state) ?? reason.playerFacingReason
             }
         } else {
             canPlace = false
-            verdict = "Move the ghost onto a site."
+            verdict = "Drag with one finger to choose a site. Two fingers pan or zoom."
         }
         return VStack(alignment: .leading, spacing: 6) {
             Text("\(tool.label) · $\(kind?.buildCost ?? 0)")
@@ -852,16 +1029,36 @@ struct IslandView: View {
                 .font(.caption2)
                 .foregroundStyle(canPlace ? Color.secondary : Color.orange)
                 .fixedSize(horizontal: false, vertical: true)
+            if kind == .farm && mapOverlay != .fertility {
+                Button("Show fertility layer") { mapOverlay = .fertility }
+                    .font(.caption.weight(.semibold)).frame(minHeight: 44)
+            }
+            Text("Preview only until you tap Place.")
+                .font(.caption2.weight(.semibold)).foregroundStyle(.secondary)
             HStack {
-                Button("Place") {
+                Button("Place · $\(kind?.buildCost ?? 0)") {
                     guard let kind, let placeTile else { return }
-                    game.send(.placeBuilding(kind, at: placeTile))
-                    if game.feedback == nil {
-                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                        scene.hidePlacementGhost()
-                        self.placeTile = nil
-                        tool = .inspect
+                    guard game.send(.placeBuilding(kind, at: placeTile)),
+                          let id = game.state.map.buildingAt(placeTile) else {
+                        UINotificationFeedbackGenerator().notificationOccurred(.error)
+                        return
                     }
+                    let building = game.state.buildings[Int(id.raw)]
+                    roadReceipt = nil
+                    placementReceipt = PlacementReceipt(id: id, anchor: building.anchor,
+                        name: String(describing: kind).capitalized, cost: kind.buildCost,
+                        buildDays: building.daysRequired, opensOnDay: building.opensOnDay)
+                    UINotificationFeedbackGenerator().notificationOccurred(.success)
+                    scene.hidePlacementGhost()
+                    self.placeTile = nil
+                    tool = .inspect
+                    selectedTile = nil
+                    // Keep the site highlighted without opening a tall inspect
+                    // panel over the result. View site opens that panel explicitly.
+                    selectedBuildingID = nil
+                    scene.setSelection(id)
+                    UIAccessibility.post(notification: .announcement,
+                        argument: "\(String(describing: kind).capitalized) construction started. Cost \(kind.buildCost).")
                 }
                 .buttonStyle(.borderedProminent)
                 .disabled(!canPlace || game.saveIssue != nil)
@@ -908,6 +1105,12 @@ struct IslandView: View {
             catalogRow("Food", [.farm, .market])
             catalogRow("Work", [.workshop, .dock])
             catalogRow("Services", [.clinic, .school, .police])
+            if DevelopmentTree.isEnabled(in: game.state) {
+                Button("View unlock requirements") {
+                    showCatalog = false
+                    showRoadmap = true
+                }.font(.caption.weight(.semibold)).frame(minHeight: 44)
+            }
             Text("Services draw their real reach. A site shows why it cannot be built.")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
@@ -929,7 +1132,11 @@ struct IslandView: View {
                                 Image("building_\(String(describing: kind))")
                                     .resizable().scaledToFit().frame(height: 46)
                                     .accessibilityHidden(true)
-                                Text(option.label).font(.caption.weight(.semibold))
+                                Label(option.label, systemImage: DevelopmentTree.canBuild(kind, in: game.state) ? "hammer.fill" : "lock.fill")
+                                    .font(.caption.weight(.semibold))
+                                if let reason = DevelopmentTree.lockReason(for: kind, in: game.state) {
+                                    Text(reason).font(.caption2).fixedSize(horizontal: false, vertical: true)
+                                }
                                 Text("$\(kind.buildCost) · \(game.state.config.constructionDays(for: kind)) days")
                                     .font(.caption2).foregroundStyle(.secondary)
                             }
@@ -938,6 +1145,7 @@ struct IslandView: View {
                         .frame(maxWidth: .infinity, minHeight: 88)
                     }
                     .buttonStyle(.bordered)
+                    .disabled(option.buildingKind.map { !DevelopmentTree.canBuild($0, in: game.state) } ?? false)
                 }
             }
         }
@@ -945,14 +1153,33 @@ struct IslandView: View {
 
     private func paveDraft() {
         var rest = roadDraft
+        var placed = 0
+        var first: TileIndex?
+        roadReceipt = nil
         while let tile = rest.first {
-            game.send(.buildRoad(at: tile))
-            if game.feedback != nil {
+            let inBounds = tile.raw >= 0 && Int(tile.raw) < game.state.map.tileCount
+            let fresh = inBounds && !game.state.map.isRoad(at: tile)
+            guard game.send(.buildRoad(at: tile)) else {
+                if let first, placed > 0 {
+                    placementReceipt = nil
+                    roadReceipt = RoadReceipt(count: placed, cost: placed * 10, anchor: first, complete: false)
+                }
+                UINotificationFeedbackGenerator().notificationOccurred(.error)
                 roadDraft = rest
                 scene.setRoadPreview(roadMarks)
                 return
             }
+            if fresh {
+                placed += 1
+                if first == nil { first = tile }
+            }
             rest.removeFirst()
+        }
+        if let first, placed > 0 {
+            placementReceipt = nil
+            roadReceipt = RoadReceipt(count: placed, cost: placed * 10, anchor: first, complete: true)
+            UINotificationFeedbackGenerator().notificationOccurred(.success)
+            UIAccessibility.post(notification: .announcement, argument: "\(placed) road tiles paved. Cost \(placed * 10).")
         }
         roadDraft = []
         scene.setRoadPreview([])
@@ -1154,4 +1381,23 @@ private extension DecisionKind {
         case .bankruptcy: return "Bankruptcy"
         }
     }
+}
+
+
+/// An accepted placement receipt is UI state, never part of the city save.
+private struct PlacementReceipt {
+    let id: BuildingID
+    let anchor: TileIndex
+    let name: String
+    let cost: Int64
+    let buildDays: Int32
+    let opensOnDay: Int32
+}
+
+
+private struct RoadReceipt {
+    let count: Int
+    let cost: Int
+    let anchor: TileIndex
+    let complete: Bool
 }

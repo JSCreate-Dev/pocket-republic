@@ -50,6 +50,7 @@ struct MainView: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: RepublicTheme.Space.lg) {
+                    DevelopmentRoadmap()
                     DecreeBoard()
                     save
                 }

@@ -56,6 +56,7 @@ extension SimulationEngine {
                 let id = WorldGenerator.construct(&s, kind, anchor: tile, entrance: entrance,
                                                   daysRequired: required)
                 let built = s.buildings[Int(id.raw)]
+                if kind.workerCapacity > 0 { s.development?.commissionedWorkplaces.append(id) }
                 let site = EventLocation(district: built.district, building: id, tile: built.entrance)
                 // Ground broken today; `buildingConstructed` waits for the last day of
                 // work. With `constructionDaysMultiplierPercent == 0` there is no site

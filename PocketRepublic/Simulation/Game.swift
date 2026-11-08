@@ -45,16 +45,25 @@ import PocketRepublicCore
 
     var snapshot: WorldSnapshot { state.snapshot() }
 
-    func send(_ intent: PlayerIntent) {
-        guard saveIssue == nil else { return }
+    /// True means the core accepted the intent. Save status remains separate.
+    @discardableResult
+    func send(_ intent: PlayerIntent) -> Bool {
+        guard saveIssue == nil else { return false }
         var next = state
         switch SimulationEngine.apply(intent, to: &next) {
         case .accepted:
             state = next
             feedback = nil
             save()
+            return true
         case .rejected(let reason):
-            feedback = reason.playerFacingReason
+            if case .placeBuilding(let kind, _) = intent,
+               let locked = DevelopmentTree.lockReason(for: kind, in: state) {
+                feedback = locked
+            } else {
+                feedback = reason.playerFacingReason
+            }
+            return false
         }
     }
 

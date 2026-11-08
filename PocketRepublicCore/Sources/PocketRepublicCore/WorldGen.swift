@@ -50,6 +50,8 @@ public enum WorldGenerator {
             }
         }
 
+        if settlement { IslandTerrain.paint(&map, seed: seed) }
+
         // Districts: 3x3 blocks over the land area.
         var districts: [District] = []
         for i in 0..<9 { districts.append(District(id: DistrictID(UInt8(i)), name: districtNames[i])) }
@@ -92,6 +94,8 @@ public enum WorldGenerator {
             _ = place(&state, .workshop, near: centre)
             for _ in 0..<4 { _ = place(&state, .house, near: centre) }
             state.config.settlementGrowth = SettlementGrowthConfig()
+            state.config.developmentRules = config.developmentRules ?? DevelopmentRules()
+            state.development = DevelopmentProgress()
         } else {
             // Every district gets a market. A starting city that is already in permanent
             // crisis is untunable; pressure should come from the player outgrowing the

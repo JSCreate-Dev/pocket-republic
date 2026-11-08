@@ -59,6 +59,8 @@ public struct RepublicState: Codable, Sendable {
     public var republicSeason: RepublicSeason?
     /// Nil on an ordinary island and on a save from before origins existed.
     public var origin: RepublicOrigin?
+    /// Nil on pre-tree saves: their existing construction catalog stays available.
+    public var development: DevelopmentProgress?
 
     /// A day-advance is blocked only by genuine crises, not by the standing agenda.
     public var blocksAdvance: Bool {

@@ -251,3 +251,91 @@ struct DecreeCardReading: Identifiable {
     }
 
 }
+
+/// The same authoritative nodes drive Govern and the island roadmap panel.
+struct DevelopmentRoadmap: View {
+    @EnvironmentObject private var game: Game
+
+    var body: some View {
+        let nodes = DevelopmentTree.nodes(in: game.state)
+        VStack(alignment: .leading, spacing: 12) {
+            Label("Republic Roadmap", systemImage: "point.topleft.down.to.point.bottomright.curvepath")
+                .font(RepublicTheme.heading(.title3))
+            if nodes.isEmpty {
+                Text("This existing city keeps its buildings available. Start a new city to follow the development roadmap.")
+                    .font(.subheadline)
+            } else {
+                Text("Build a working settlement, then develop trade and community. Both paths stay open. Earned unlocks are permanent.")
+                    .font(.caption).foregroundStyle(RepublicTheme.inkSoft)
+                milestone(.workingTown, in: nodes)
+                Label("Trade path", systemImage: "ferry.fill")
+                    .font(.caption.weight(.bold)).foregroundStyle(RepublicTheme.inkSoft)
+                milestone(.harborCharter, in: nodes)
+                    .padding(.leading, 12)
+                Label("Community path", systemImage: "person.3.fill")
+                    .font(.caption.weight(.bold)).foregroundStyle(RepublicTheme.inkSoft)
+                milestone(.communityCare, in: nodes)
+                    .padding(.leading, 12)
+                Image(systemName: "arrow.down").font(.caption).padding(.leading, 24)
+                    .accessibilityHidden(true)
+                milestone(.civicTown, in: nodes)
+                    .padding(.leading, 12)
+                Text("Homes, roads, farms, markets and workshops are always available. Residents find their own jobs.")
+                    .font(.caption2).foregroundStyle(RepublicTheme.inkSoft)
+            }
+        }
+        .dioramaCard()
+    }
+
+    @ViewBuilder private func milestone(_ id: DevelopmentUnlock, in nodes: [DevelopmentNode]) -> some View {
+        if let node = nodes.first(where: { $0.id == id }) {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 10) {
+                    Image("building_\(String(describing: id.building))")
+                        .resizable().scaledToFit().frame(width: 48, height: 48)
+                        .accessibilityHidden(true)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(id.title).font(.subheadline.weight(.bold))
+                        Text(id.reward).font(.caption).foregroundStyle(RepublicTheme.inkSoft)
+                    }
+                    Spacer(minLength: 0)
+                    Image(systemName: node.unlocked ? "checkmark.seal.fill" : "lock.fill")
+                        .foregroundStyle(node.unlocked ? RepublicTheme.fertile : RepublicTheme.inkSoft)
+                        .accessibilityLabel(node.unlocked ? "Unlocked" : "Locked")
+                }
+                Text(node.unlocked ? "Unlocked · $\(node.grant) infrastructure grant awarded"
+                     : "Reward: building access + $\(node.grant) infrastructure grant")
+                    .font(.caption2.weight(.semibold))
+                if !node.unlocked {
+                    if let prerequisite = id.prerequisite, !node.prerequisiteMet {
+                        Text("First earn \(prerequisite.title)")
+                            .font(.caption.weight(.semibold)).foregroundStyle(RepublicTheme.terracotta)
+                    }
+                    ForEach(node.requirements.indices, id: \.self) { index in
+                        let requirement = node.requirements[index]
+                        VStack(alignment: .leading, spacing: 3) {
+                            HStack {
+                                Image(systemName: requirement.met ? "checkmark.circle.fill" : "circle")
+                                    .foregroundStyle(requirement.met ? RepublicTheme.fertile : RepublicTheme.inkSoft)
+                                Text(requirement.title)
+                                Spacer(minLength: 4)
+                                Text("\(requirement.current) / \(requirement.target)").monospacedDigit()
+                            }
+                            .font(.caption2)
+                            ProgressView(value: Double(max(0, min(requirement.current, requirement.target))),
+                                         total: Double(max(1, requirement.target)))
+                                .tint(RepublicTheme.fertile)
+                                .accessibilityLabel(requirement.title)
+                                .accessibilityValue("\(requirement.current) of \(requirement.target)")
+                        }
+                    }
+                    Text("Awarded automatically when the requirements hold after Next Day.")
+                        .font(.caption2).foregroundStyle(RepublicTheme.inkSoft)
+                }
+            }
+            .padding(10)
+            .background(RepublicTheme.ink.opacity(node.unlocked ? 0.04 : 0.07),
+                        in: RoundedRectangle(cornerRadius: 12))
+        }
+    }
+}

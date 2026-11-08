@@ -26,6 +26,10 @@ extension SimulationEngine {
                                          at anchor: TileIndex,
                                          in state: RepublicState) -> PlacementValidation {
         if state.pending != nil { return .rejected(.crisisPendingBlocksBuilding) }
+        // Reuse the existing progress-not-ready rejection to keep the core-only
+        // patch source-compatible with the app's exhaustive rejection reader.
+        // UI reads DevelopmentTree.lockReason for the specific milestone.
+        if !DevelopmentTree.canBuild(kind, in: state) { return .rejected(.seasonNotReady) }
         let site = FootprintRules.assess(kind, anchoredAt: anchor, on: state.map)
         if let reason = site.rejection { return .rejected(reason) }
         guard let entrance = site.entrance else { return .rejected(.notConnectedToRoad) }

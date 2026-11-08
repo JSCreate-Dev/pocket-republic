@@ -47,7 +47,7 @@ elections block; the standing agenda never stalls the clock.
    `CitizenDelta`s, then apply in ID order. No citizen sees another's same-day
    change, which is what makes the tick order-independent and parallelisable later.
 5. `aggregateDistricts` → `updateFactions` → `updateNationalMood`
-6. `evaluateCrises` → `AgendaGenerator.update`
+6. `DevelopmentTree.advance` (optional new-city roadmap, one-time accounted grants) → `evaluateCrises` → `AgendaGenerator.update`
 
 ## Invariants the tests enforce
 

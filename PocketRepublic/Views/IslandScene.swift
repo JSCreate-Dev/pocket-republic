@@ -8,6 +8,11 @@ final class IslandScene: SKScene {
 
     private let terrainLayer = SKNode()
     private let buildingLayer = SKNode()
+    private let overlayLayer = SKNode()
+    private var overlayMode: MapOverlayMode = .standard
+    private var overlaySnapshot: MapOverlaySnapshot?
+    private var overlayNodes: [Int32: SKSpriteNode] = [:]
+    private var overlayMarker: SKTexture?
     private let peopleLayer = SKNode()
     private let cameraNode = SKCameraNode()
     private let nightLayer = SKSpriteNode(color: .black, size: .zero)
@@ -44,6 +49,7 @@ final class IslandScene: SKScene {
     private var cameraUserAdjusted = false
     private var framing: CameraFraming?
     private var touchStart: CGPoint?
+    private var hoverBeforeGesture: TileIndex?
     private var gesture = MapGesturePolicy()
     private let selectionLayer = SKNode()
     private var selectionNodes: [Int32: SKShapeNode] = [:]
@@ -58,11 +64,13 @@ final class IslandScene: SKScene {
         isUserInteractionEnabled = true
         terrainLayer.zPosition = 0
         reachLayer.zPosition = 5
+        overlayLayer.zPosition = 4
         buildingLayer.zPosition = 10
         selectionLayer.zPosition = 15
         ghostLayer.zPosition = 20
         peopleLayer.zPosition = 30
         addChild(terrainLayer)
+        addChild(overlayLayer)
         addChild(reachLayer)
         addChild(buildingLayer)
         addChild(selectionLayer)
@@ -127,10 +135,15 @@ final class IslandScene: SKScene {
         }
         if presentedSeed != state.worldSeed {
             resetConstructionPresentation()
+            routines.removeAll()
+            selectedBuildingID = nil
             presentedSeed = state.worldSeed
+            cameraInitialized = false
+            cameraUserAdjusted = false
         }
         noteConstruction(in: state)
         renderedState = state
+        overlaySnapshot = overlayMode == .standard ? nil : MapOverlaySnapshot(mode: overlayMode, state: state)
         if !cameraInitialized {
             let middle = state.map.width / 2
             let worldCenter = point(x: middle, y: middle)
@@ -291,6 +304,67 @@ final class IslandScene: SKScene {
         }
         refreshPeople(state: state, rect: rect)
         refreshSelection()
+        drawOverlay(state: state)
+    }
+
+    func setOverlay(_ mode: MapOverlayMode) {
+        guard overlayMode != mode else { return }
+        overlayMode = mode
+        overlaySnapshot = renderedState.flatMap { mode == .standard ? nil : MapOverlaySnapshot(mode: mode, state: $0) }
+        let diagnostic = mode != .standard
+        buildingLayer.alpha = diagnostic ? 0.65 : 1
+        terrainLayer.alpha = diagnostic ? 0.7 : 1
+        peopleLayer.alpha = diagnostic ? 0.75 : 1
+        nightLayer.isHidden = diagnostic
+        refreshVisible(force: true)
+    }
+
+    private func drawOverlay(state: RepublicState) {
+        guard overlayMode != .standard, let overlaySnapshot else {
+            overlayLayer.removeAllChildren()
+            overlayNodes.removeAll()
+            return
+        }
+        if overlayMarker == nil { overlayMarker = BuildingArtwork.tileMarkerTexture(size: MapArt.tileSize) }
+        let wanted = Set(tileNodes.keys.filter { state.map.terrain(at: TileIndex($0)) != .water })
+        for raw in wanted {
+            let tile = TileIndex(raw)
+            let score = overlaySnapshot.value(at: tile)
+            let node: SKSpriteNode
+            if let existing = overlayNodes[raw] { node = existing }
+            else {
+                node = SKSpriteNode(texture: overlayMarker, size: MapArt.tileSize)
+                node.isUserInteractionEnabled = false
+                node.colorBlendFactor = 1
+                node.position = point(for: tile, in: state.map)
+                overlayNodes[raw] = node
+                overlayLayer.addChild(node)
+            }
+            node.color = overlayColor(score)
+            node.alpha = score == nil ? 0.2 : 0.58
+        }
+        for raw in overlayNodes.keys.filter({ !wanted.contains($0) }) {
+            overlayNodes.removeValue(forKey: raw)?.removeFromParent()
+        }
+    }
+
+    private func overlayColor(_ score: Int16?) -> UIColor {
+        guard let score else { return UIColor(white: 0.55, alpha: 1) }
+        if overlayMode == .fertility {
+            return score == 100 ? UIColor(red: 0.22, green: 0.85, blue: 0.38, alpha: 1)
+                : UIColor(red: 0.65, green: 0.48, blue: 0.27, alpha: 1)
+        }
+        if overlayMode == .foodAccess {
+            if score == 100 { return UIColor(red: 0.2, green: 0.8, blue: 0.4, alpha: 1) }
+            return score > 0 ? UIColor(red: 0.95, green: 0.68, blue: 0.2, alpha: 1)
+                : UIColor(red: 0.9, green: 0.25, blue: 0.18, alpha: 1)
+        }
+        let t = CGFloat(max(0, min(100, Int(score)))) / 100
+        if t < 0.5 {
+            return UIColor(red: 0.9, green: 0.25 + t * 0.9, blue: 0.18, alpha: 1)
+        }
+        return UIColor(red: 0.9 - (t - 0.5) * 1.4, green: 0.7 + (t - 0.5) * 0.2,
+                       blue: 0.18 + (t - 0.5) * 0.44, alpha: 1)
     }
 
     /// A new city, or the first picture of a loaded save, must not replay pops.
@@ -985,8 +1059,16 @@ final class IslandScene: SKScene {
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
         gesture.roadMode = roadDrawing
         let fingers = fingerCount(in: event, fallback: touches)
+        if touchStart == nil && !gesture.multiFinger { hoverBeforeGesture = hoverTile }
         gesture.began(activeFingers: fingers)
-        guard fingers < 2, let touch = touches.first else { return }
+        if fingers >= 2, placementKind != nil {
+            // A second finger turns the entire gesture into navigation. Restore
+            // the site's position from before the first finger touched down.
+            hoverTile = hoverBeforeGesture
+            onHoverTile?(hoverTile)
+            refreshPlacementGhost()
+        }
+        guard fingers < 2, !gesture.multiFinger, let touch = touches.first else { return }
         touchStart = touch.location(in: self)
         updateHover(at: touchStart!)
     }
@@ -1014,6 +1096,16 @@ final class IslandScene: SKScene {
         }
         guard let touch = touches.first else { return }
         let p = touch.location(in: self)
+        // In build mode a single finger positions the ghost, not the camera.
+        // A pinch latches multiFinger until every touch lifts, so dropping back
+        // to one finger cannot unexpectedly move the chosen site.
+        if placementKind != nil {
+            guard !gesture.multiFinger else { return }
+            _ = gesture.moved(activeFingers: 1, panX: 0, panY: 0,
+                              oldDistance: 0, newDistance: 0, treatAsDrag: true)
+            updateHover(at: p)
+            return
+        }
         let previous = touch.previousLocation(in: self)
         let far = touchStart.map { hypot(p.x - $0.x, p.y - $0.y) > 8 } ?? false
         let decision = gesture.moved(
@@ -1048,7 +1140,10 @@ final class IslandScene: SKScene {
         let wasDrag = gesture.dragged
         let wasMulti = gesture.multiFinger
         let roadTap = gesture.ended(remainingFingers: remaining)
-        if remaining == 0 { touchStart = nil }
+        if remaining == 0 {
+            touchStart = nil
+            hoverBeforeGesture = nil
+        }
         guard !cancelled, remaining == 0, let state = renderedState, let touch = touches.first,
               let tile = tile(at: touch.location(in: self), in: state.map) else { return }
         if roadTap {
@@ -1072,6 +1167,20 @@ final class IslandScene: SKScene {
             scaleFactor: scaleFactor)
         cameraNode.position = CGPoint(x: nudged.x, y: nudged.y)
         cameraNode.setScale(nudged.scale)
+        cameraUserAdjusted = true
+        clampCameraToMap()
+        refreshVisible()
+    }
+
+    /// Keep the confirmed site's position inside the usable map, above controls.
+    func focus(on tile: TileIndex) {
+        guard let state = renderedState, tile.raw >= 0, Int(tile.raw) < state.map.tileCount else { return }
+        let world = point(for: tile, in: state.map)
+        let focus = framing?.focusRect ?? CGRect(origin: .zero, size: size)
+        let dx = focus.midX - size.width / 2
+        let dy = focus.midY - size.height / 2
+        cameraNode.position = CGPoint(x: world.x - dx * cameraNode.xScale,
+                                      y: world.y + dy * cameraNode.yScale)
         cameraUserAdjusted = true
         clampCameraToMap()
         refreshVisible()
@@ -1332,6 +1441,37 @@ private extension TerrainKind {
         case .grass: return UIColor(red: 0.32, green: 0.61, blue: 0.35, alpha: 1)
         case .fertile: return UIColor(red: 0.24, green: 0.51, blue: 0.28, alpha: 1)
         case .rock: return UIColor(red: 0.48, green: 0.50, blue: 0.48, alpha: 1)
+        }
+    }
+}
+
+
+extension MapOverlayMode {
+    var title: String {
+        switch self {
+        case .standard: return "Normal map"
+        case .fertility: return "Fertility"
+        case .happiness: return "Happiness"
+        case .foodAccess: return "Food access"
+        case .employment: return "Jobs"
+        }
+    }
+    var symbol: String {
+        switch self {
+        case .standard: return "map"
+        case .fertility: return "leaf.fill"
+        case .happiness: return "face.smiling"
+        case .foodAccess: return "basket.fill"
+        case .employment: return "briefcase.fill"
+        }
+    }
+    var legend: String {
+        switch self {
+        case .standard: return ""
+        case .fertility: return "Green: fertile soil · brown: other land. Farms need at least 5 fertile tiles in their 3×3 footprint."
+        case .happiness: return "District averages: red 0 → amber 50 → green 100. Gray: no residents."
+        case .foodAccess: return "Homes & roads: green stocked market · amber empty market · red no access · gray no coverage data."
+        case .employment: return "District residents employed: red 0% → amber 50% → green 100%. Gray: no residents."
         }
     }
 }

@@ -34,6 +34,7 @@ public enum SimulationEngine {
         aggregateDistricts(&s)
         updateFactions(&s)
         updateNationalMood(&s)
+        DevelopmentTree.advance(&s)
         evaluateCrises(&s)
         AgendaGenerator.update(&s)
 
