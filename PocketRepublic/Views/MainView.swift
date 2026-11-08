@@ -14,7 +14,7 @@ struct MainView: View {
             govern.tabItem { Label("Govern", systemImage: "building.columns.fill") }.tag(2)
             events.tabItem { Label("Gazette", systemImage: "newspaper.fill") }.tag(3)
         }
-        .tint(.mint)
+        .tint(RepublicTheme.brass)
         .onChange(of: game.state.pending?.id) { _, pendingID in
             if pendingID != nil { tab = 0 }
         }
@@ -34,8 +34,7 @@ struct MainView: View {
     private var island: some View {
         NavigationStack {
             IslandView(islandVisible: tab == 0)
-                .navigationTitle("Pocket Republic")
-                .navigationBarTitleDisplayMode(.inline)
+                .toolbar(.hidden, for: .navigationBar)
         }
     }
 
