@@ -21,6 +21,8 @@ public enum SimulationEngine {
         if s.fields.dirty { rebuildSpatialCaches(&s) }
 
         assignWork(&s)
+        admitNewcomers(&s)
+        if s.config.settlementGrowth != nil { assignWork(&s) }
         produce(&s)
         distributeFood(&s)
         payWages(&s)
@@ -844,5 +846,59 @@ public enum SimulationEngine {
         s.lastCrisisDay = s.day
         s.crisisKindCooldown[kind.slot] = s.config.nationalCrisisCooldownDays
         s.emit(.crisisRaised, location: location, causes: causes)
+    }
+}
+
+
+extension SimulationEngine {
+    /// Growth follows available housing, reachable jobs and stocked markets.
+    /// Runs before hiring so newcomers can work and eat on their arrival day.
+    static func admitNewcomers(_ s: inout RepublicState) {
+        guard let rules = s.config.settlementGrowth,
+              rules.arrivalIntervalDays > 0, s.day > 0,
+              s.day % rules.arrivalIntervalDays == 0 else { return }
+        let living = s.citizens.filter { $0.alive }
+        guard !living.isEmpty, living.allSatisfy({ $0.daysHungry == 0 }),
+              living.reduce(Int64(0), { $0 + Int64($1.happiness) }) / Int64(living.count)
+                >= Int64(rules.minimumHappiness) else { return }
+        let openJobs = s.buildings.filter { $0.isStanding(on: s.map) }
+        var vacancies = openJobs.map { max(0, Int($0.kind.workerCapacity) - $0.workers.count) }
+        var admitted: [CitizenID] = []
+        for _ in 0..<max(0, rules.arrivalsPerWave) {
+            guard let home = s.buildings.first(where: { house in
+                guard house.kind == .house, house.isStanding(on: s.map),
+                      house.residents.count < Int(house.kind.housingCapacity),
+                      let market = shoppingMarket(s, homeTile: house.tile),
+                      Int64(s.buildings[Int(market.raw)].foodStore) >=
+                        Int64(living.count + admitted.count + 1) * Int64(max(1, rules.foodReserveDays))
+                        * Int64(s.config.foodPerCitizenPerDay) else { return false }
+                return openJobs.indices.contains { vacancies[$0] > 0 && s.fields.areConnected(house.tile, openJobs[$0].tile) }
+            }), let job = openJobs.indices.first(where: {
+                vacancies[$0] > 0 && s.fields.areConnected(home.tile, openJobs[$0].tile)
+            }) else { break }
+            vacancies[job] -= 1
+            let id = CitizenID(s.nextCitizenRaw)
+            s.nextCitizenRaw += 1
+            // Stable name and temperament from identity/seed, without shifting wellbeing RNG.
+            var rng = SeededRNG(seed: s.worldSeed ^ UInt64(id.raw) &* 0x9E37_79B9)
+            let name = "\(WorldGenerator.firstNames[rng.int(0...(WorldGenerator.firstNames.count - 1))]) \(WorldGenerator.surnames[rng.int(0...(WorldGenerator.surnames.count - 1))])"
+            var citizen = Citizen(id: id, name: name, age: Int32(rng.int(18...55)),
+                                  district: home.district, money: 0, happiness: 60,
+                                  loyalty: 55, ambition: Int32(rng.int(10...95)), influence: 20)
+            citizen.home = home.id
+            s.citizens.append(citizen)
+            s.buildings[Int(home.id.raw)].residents.append(id)
+            s.transfer(from: .external, to: .citizen(id), rules.newcomerMoney)
+            admitted.append(id)
+        }
+        if !admitted.isEmpty {
+            s.fields.markDirty()
+            // Refresh servingMarket for newly inhabited neighbourhoods, not just field geometry.
+            rebuildSpatialCaches(&s)
+            s.emit(.migrationArrival, subjects: admitted,
+                   causes: [CauseFactor(.policyChange, value: Int32(admitted.count),
+                                        detail: "New homes, reachable jobs and food attracted newcomers")],
+                   magnitude: Int32(admitted.count))
+        }
     }
 }

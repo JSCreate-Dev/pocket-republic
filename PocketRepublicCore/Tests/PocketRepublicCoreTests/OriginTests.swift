@@ -4,7 +4,7 @@ import XCTest
 final class OriginTests: XCTestCase {
 
     func testOrdinaryIslandOmitsOriginAndKeepsItsHash() throws {
-        let state = WorldGenerator.generate(seed: 2026)
+        let state = WorldGenerator.generate(seed: 2026, citizenCount: 120)
         XCTAssertNil(state.origin)
         XCTAssertFalse(state.agenda.contains { $0.originDilemma == true })
         let data = try JSONEncoder().encode(state)
@@ -22,10 +22,10 @@ final class OriginTests: XCTestCase {
     }
 
     func testEachOriginChangesTheOpeningAndReplays() throws {
-        let plain = WorldGenerator.generate(seed: 2026)
+        let plain = WorldGenerator.generate(seed: 2026, citizenCount: 120)
         for origin in RepublicOrigin.allCases {
-            let first = WorldGenerator.generate(seed: 2026, origin: origin)
-            let second = WorldGenerator.generate(seed: 2026, origin: origin)
+            let first = WorldGenerator.generate(seed: 2026, citizenCount: 120, origin: origin)
+            let second = WorldGenerator.generate(seed: 2026, citizenCount: 120, origin: origin)
             XCTAssertEqual(first.origin, origin)
             XCTAssertEqual(first.stateHash(), second.stateHash(), "\(origin) must replay")
             XCTAssertNotEqual(first.stateHash(), plain.stateHash(), "\(origin) must differ from an ordinary island")
@@ -37,9 +37,9 @@ final class OriginTests: XCTestCase {
             advance(&twin, days: 2)
             XCTAssertEqual(replay.stateHash(), twin.stateHash())
         }
-        let marque = WorldGenerator.generate(seed: 2026, origin: .marque)
-        let parade = WorldGenerator.generate(seed: 2026, origin: .parade)
-        let pot = WorldGenerator.generate(seed: 2026, origin: .commonPot)
+        let marque = WorldGenerator.generate(seed: 2026, citizenCount: 120, origin: .marque)
+        let parade = WorldGenerator.generate(seed: 2026, citizenCount: 120, origin: .parade)
+        let pot = WorldGenerator.generate(seed: 2026, citizenCount: 120, origin: .commonPot)
         XCTAssertGreaterThan(marque.treasury, plain.treasury)
         XCTAssertGreaterThan(marque.corruption, plain.corruption)
         XCTAssertGreaterThan(parade.legitimacy, plain.legitimacy)
@@ -49,7 +49,7 @@ final class OriginTests: XCTestCase {
     }
 
     func testDilemmaAppliesOnceAndLoadDoesNotRepeatThePurse() throws {
-        var marque = WorldGenerator.generate(seed: 4, origin: .marque)
+        var marque = WorldGenerator.generate(seed: 4, citizenCount: 120, origin: .marque)
         let opened = marque.treasury
         let dilemma = try XCTUnwrap(marque.agenda.first { $0.originDilemma == true })
         XCTAssertEqual(SimulationEngine.apply(.resolveAgendaItem(dilemma.id, option: 0), to: &marque), .accepted)
@@ -66,7 +66,7 @@ final class OriginTests: XCTestCase {
     }
 
     func testTradeoffsAreRealAndTheCompactStaysOpen() {
-        var plain = WorldGenerator.generate(seed: 11)
+        var plain = WorldGenerator.generate(seed: 11, citizenCount: 120)
         advance(&plain, days: 1)
         var marque = plain
         marque.origin = .marque
@@ -98,7 +98,7 @@ final class OriginTests: XCTestCase {
         SimulationEngine.payUpkeep(&plain)
         XCTAssertEqual((plainTreasury - plain.treasury) - (paradeTreasury - parade.treasury), Int64(civic))
 
-        var city = WorldGenerator.generate(seed: 8, origin: .marque)
+        var city = WorldGenerator.generate(seed: 8, citizenCount: 120, origin: .marque)
         place(.house, in: &city)
         advance(&city, days: 2)
         XCTAssertEqual(SimulationEngine.apply(.advanceSeason(.claimFounding), to: &city), .accepted)
@@ -108,7 +108,7 @@ final class OriginTests: XCTestCase {
 
     func testEarlyPathForEachOrigin() throws {
         for origin in RepublicOrigin.allCases {
-            var state = WorldGenerator.generate(seed: 2026, origin: origin)
+            var state = WorldGenerator.generate(seed: 2026, citizenCount: 120, origin: origin)
             print("ORIGIN \(origin.rawValue) day 0 treasury \(state.treasury) food \(state.totalFoodInWorld) corruption \(state.corruption) legitimacy \(state.legitimacy)")
             XCTAssertGreaterThan(state.totalFoodInWorld, 0)
             XCTAssertGreaterThan(state.treasury, 500)
