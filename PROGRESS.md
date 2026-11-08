@@ -12,7 +12,11 @@ Jordan wants Pocket Republic to feel like a lively, living world with a real gam
 
 ## Current state
 
-Code snapshot: map-first controls, cut from main `1bab3cf` (PR #29, the season and three origins). That main **Build iOS IPA** passed: [run 42441190337](https://github.com/JSCreate-Dev/pocket-republic/actions/runs/42441190337), **116 tests, 0 failures** (199.854 seconds). The unsigned IPA is artifact `13601748346` (`PocketRepublic-unsigned-ipa`, 5,453,632 bytes, expires 2027-02-06T03:05:02Z). Signed upload was skipped. This branch does not change the simulation. No iPhone run is claimed for the new controls.
+Ios Dev presentation pass off main `97c1a2c`, informed by Jordan's two screenshots and 19.6-second recording. The island no longer reserves a navigation-title band. Its HUD is a compact, width-capped charcoal resource strip with warm brass accents, and building/work/housing feedback. The lower dock has a single row on wide displays and two rows on narrow displays, 44-point targets, restrained selection and a distinct Next Day action. Idle controls reserve 76 points on wide displays instead of up to 148. Build catalog tiles show existing building art, price and construction days. Detail cards and fold-reserved panes keep their existing behavior.
+
+The simulation, saved cities and citizen job assignment are unchanged on this branch. Citizens already find work automatically; the HUD says to expand the economy, not assign workers. The separate `gameplay/settlement-growth` work introduces the smaller start and arrivals; it is not a dependency of this UI branch.
+
+Verified: Swift 6.2 parser on all three changed Swift files and `git diff --check`. No iOS SDK is available locally, so SwiftUI typechecking, screenshots, device build, accessibility-size layout and physical Duo posture checks remain unverified. GitHub rejected upload with 403 Resource not accessible by integration; no PR or CI run exists for this pass. This is UI polish over existing sprites, not new AAA art, audio or a complete retention system.
 
 PR #24 remains the construction clock in the core: foundation, scaffold, complete, in whole sim-days. PR #26 draws those stages. PR #27 did not retune build times. A demolished building is no longer a ghost workplace: `isStanding(on:)` is the economy gate, and `visibleBuildings` omits rubble. Sites still draw, because they own their tiles.
 
