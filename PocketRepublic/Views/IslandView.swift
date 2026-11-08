@@ -7,6 +7,7 @@ import PocketRepublicCore
 /// The SpriteKit world stays behind them and is never part of the saved simulation.
 struct IslandView: View {
     @EnvironmentObject private var game: Game
+    @EnvironmentObject private var clock: DayClock
     @Environment(\.verticalSizeClass) private var verticalSizeClass
     @Environment(\.layoutDirection) private var layoutDirection
     @State private var scene = IslandScene(size: CGSize(width: 400, height: 470))
@@ -18,6 +19,7 @@ struct IslandView: View {
     @State private var sheetExpanded = false
     @State private var tentMode = false
     @State private var tentControlsOpen = false
+    @State private var dismissedIslandEvent: DecisionID?
 
     var body: some View {
         GeometryReader { geometry in
@@ -78,6 +80,7 @@ struct IslandView: View {
                 scene.render(game.state)
                 scene.setSelection(selectedBuildingID)
                 configureTapHandler()
+                openIslandEventIfNeeded()
             }
             .sensoryFeedback(.selection, trigger: selectedBuildingID) { _, newValue in
                 newValue != nil
@@ -101,6 +104,9 @@ struct IslandView: View {
         }
         .onChange(of: tool) { _, newTool in
             if newTool != .inspect { selectedBuildingID = nil }
+        }
+        .onChange(of: liveIslandEventID) { _, _ in
+            openIslandEventIfNeeded()
         }
     }
 
@@ -154,6 +160,8 @@ struct IslandView: View {
             } else {
                 scrolling
             }
+            dayClockControls
+                .padding(.horizontal, 8)
             Button { game.advance() } label: {
                 Label(layout.isSingleScreen ? "Next Day" : "Advance One Day", systemImage: "forward.fill")
                     .frame(maxWidth: .infinity, minHeight: 44)
@@ -238,6 +246,10 @@ struct IslandView: View {
                 Text(issue).font(.caption).foregroundStyle(.red)
                     .lineLimit(layout.scrollControls ? nil : 3)
             }
+            Text(clock.policy.controlLabel)
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding(6)
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 10))
@@ -257,16 +269,30 @@ struct IslandView: View {
         return game.state.agenda.first(where: { $0.id == selectedAgendaID })
     }
 
+    private var previewAgenda: [AgendaItem] {
+        game.state.agenda.sorted { lhs, rhs in
+            previewRank(lhs) < previewRank(rhs)
+        }
+    }
+
+    private func previewRank(_ item: AgendaItem) -> Int {
+        if item.islandEventID != nil { return 0 }
+        if item.tier == .crisis { return 1 }
+        if item.kind == .decree { return 3 }
+        return 2
+    }
+
     @ViewBuilder private func agendaPreviews(layout: CityDisplayLayout) -> some View {
+        let items = Array(previewAgenda.prefix(layout.visibleCards))
         if layout.stackedPreviews {
             VStack(spacing: 5) {
-                ForEach(Array(game.state.agenda.prefix(layout.visibleCards))) { item in
+                ForEach(items) { item in
                     previewButton(item)
                 }
             }
         } else {
             HStack(spacing: 5) {
-                ForEach(Array(game.state.agenda.prefix(layout.visibleCards))) { item in
+                ForEach(items) { item in
                     previewButton(item)
                 }
             }
@@ -276,17 +302,27 @@ struct IslandView: View {
     private func previewButton(_ item: AgendaItem) -> some View {
         Button {
             selectedAgendaID = item.id
+            if item.islandEventID != nil { dismissedIslandEvent = nil }
         } label: {
             HStack(spacing: 5) {
-                Image(systemName: "text.bubble.fill")
-                Text(item.kind.cityTitle).lineLimit(1)
+                Image(systemName: item.islandEventID == nil ? "text.bubble.fill" : "newspaper.fill")
+                Text(item.islandEvent?.title ?? item.kind.cityTitle).lineLimit(1)
                 Image(systemName: "chevron.right").font(.caption2)
             }
             .font(.caption.weight(.semibold))
             .frame(maxWidth: .infinity, minHeight: 36)
         }
         .buttonStyle(.borderedProminent)
-        .tint(.indigo)
+        .tint(previewTint(item))
+    }
+
+    private func previewTint(_ item: AgendaItem) -> Color {
+        switch item.islandEvent?.tone {
+        case .good: return Color(red: 0.24, green: 0.55, blue: 0.28)
+        case .bad: return Color(red: 0.72, green: 0.28, blue: 0.16)
+        case .weird: return Color(red: 0.05, green: 0.45, blue: 0.62)
+        case nil: return .indigo
+        }
     }
 
     private func crisisCard(_ pending: PendingDecision, layout: CityDisplayLayout) -> some View {
@@ -295,8 +331,8 @@ struct IslandView: View {
                 .font(.headline)
                 .foregroundStyle(.orange)
             Text(pending.kind.cityTitle).font(.subheadline.weight(.semibold))
-            if let cause = pending.causes.first {
-                Text("\(cause.detail): \(cause.value)")
+            if let line = pending.causes.compactMap(CauseSpeech.line).first {
+                Text("Because \(line)")
                     .font(.caption).foregroundStyle(.secondary)
             }
             Text("The next day waits for your choice.")
@@ -322,37 +358,51 @@ struct IslandView: View {
     }
 
     private func agendaCard(_ item: AgendaItem, layout: CityDisplayLayout) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Text(item.kind.cityTitle).font(.headline)
-                Spacer()
-                Button("Close", systemImage: "xmark") { selectedAgendaID = nil }
-                    .labelStyle(.iconOnly)
-                    .accessibilityLabel("Close decision")
+        AgendaChoiceCard(
+            item: item,
+            treasury: game.state.treasury,
+            day: game.state.day,
+            saveBlocked: game.saveIssue != nil,
+            onResolve: { option in
+                game.send(.resolveAgendaItem(item.id, option: option))
+                selectedAgendaID = nil
+            },
+            onClose: {
+                if item.islandEventID != nil { dismissedIslandEvent = item.id }
+                selectedAgendaID = nil
             }
-            if let cause = item.causes.first {
-                Text("\(cause.detail): \(cause.value)")
-                    .font(.caption).foregroundStyle(.secondary)
-            }
-            ScrollView(.vertical) {
-                VStack(spacing: 6) {
-                    ForEach(item.options) { option in
-                        Button {
-                            game.send(.resolveAgendaItem(item.id, option: option.id))
-                            selectedAgendaID = nil
-                        } label: {
-                            Text(option.label).frame(maxWidth: .infinity, minHeight: 44)
-                        }
-                        .buttonStyle(.borderedProminent)
-                    }
-                }
-            }
-            .frame(maxHeight: layout.optionListHeight)
-        }
+        )
         .frame(maxWidth: layout.cardWidth, alignment: .leading)
-        .padding(12)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14))
-        .accessibilityElement(children: .contain)
+    }
+
+    private var liveIslandEventID: DecisionID? {
+        game.state.agenda.first { $0.islandEventID != nil }?.id
+    }
+
+    private func openIslandEventIfNeeded() {
+        guard let id = liveIslandEventID, id != dismissedIslandEvent else { return }
+        selectedAgendaID = id
+        sheetExpanded = true
+    }
+
+    private var dayClockControls: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Menu {
+                Button("Paused") { clock.setPace(.paused) }
+                Button("Leisurely · 6 seconds") { clock.setPace(.playing(DayClockPolicy.leisurely)) }
+                Button("Steady · 3.5 seconds") { clock.setPace(.playing(DayClockPolicy.steady)) }
+                Button("Brisk · 2 seconds") { clock.setPace(.playing(DayClockPolicy.brisk)) }
+            } label: {
+                Label(clock.policy.controlLabel, systemImage: clock.policy.tickInterval == nil ? "pause.fill" : "play.fill")
+                    .font(.caption.weight(.semibold))
+                    .frame(maxWidth: .infinity, minHeight: 36)
+            }
+            .buttonStyle(.bordered)
+            Text(clock.policy.explanation)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
     }
 
     @ViewBuilder private func toolStrip(compact: Bool, narrow: Bool) -> some View {
