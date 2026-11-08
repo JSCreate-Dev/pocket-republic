@@ -7,6 +7,8 @@ final class IslandScene: SKScene {
     var onTileTap: ((TileIndex) -> Void)?
 
     private let terrainLayer = SKNode()
+    private let shadowLayer = SKNode()
+    private var buildingShadows: [BuildingID: SKSpriteNode] = [:]
     private let buildingLayer = SKNode()
     private let overlayLayer = SKNode()
     private var overlayMode: MapOverlayMode = .standard
@@ -64,12 +66,14 @@ final class IslandScene: SKScene {
         isUserInteractionEnabled = true
         terrainLayer.zPosition = 0
         reachLayer.zPosition = 5
+        shadowLayer.zPosition = 2
         overlayLayer.zPosition = 4
         buildingLayer.zPosition = 10
         selectionLayer.zPosition = 15
         ghostLayer.zPosition = 20
         peopleLayer.zPosition = 30
         addChild(terrainLayer)
+        addChild(shadowLayer)
         addChild(overlayLayer)
         addChild(reachLayer)
         addChild(buildingLayer)
@@ -295,11 +299,13 @@ final class IslandScene: SKScene {
             wantedBuildings.insert(building.id)
             siteLayouts[building.id] = layout
             presentBuilding(building, layout: layout, config: state.config)
+            presentShadow(building, layout: layout, config: state.config)
         }
         let goneBuildings = buildingNodes.keys.filter { !wantedBuildings.contains($0) }
         for id in goneBuildings {
             buildingNodes[id]?.removeFromParent()
             buildingNodes.removeValue(forKey: id)
+            buildingShadows.removeValue(forKey: id)?.removeFromParent()
             siteLayouts.removeValue(forKey: id)
         }
         refreshPeople(state: state, rect: rect)
@@ -316,6 +322,7 @@ final class IslandScene: SKScene {
         terrainLayer.alpha = diagnostic ? 0.7 : 1
         peopleLayer.alpha = diagnostic ? 0.75 : 1
         nightLayer.isHidden = diagnostic
+        shadowLayer.isHidden = diagnostic
         refreshVisible(force: true)
     }
 
@@ -371,6 +378,8 @@ final class IslandScene: SKScene {
     private func resetConstructionPresentation() {
         for (_, node) in buildingNodes { node.removeFromParent() }
         buildingNodes.removeAll()
+        shadowLayer.removeAllChildren()
+        buildingShadows.removeAll()
         siteLayouts.removeAll()
         siteVisuals.removeAll()
         presentationPrimed = false
@@ -453,6 +462,22 @@ final class IslandScene: SKScene {
         if building.isUnderConstruction { visual.sawSite = true }
         siteVisuals[building.id] = visual
         configureCrew(on: container, stage: visual.displayed ?? stage, kind: building.kind)
+    }
+
+    private func presentShadow(_ building: Building, layout: IsoFootprintLayout, config: BalanceConfig) {
+        let stage = building.stage(in: config)
+        let key = "\(stage)"
+        let shadow: SKSpriteNode
+        if let existing = buildingShadows[building.id], existing.name == key { shadow = existing }
+        else {
+            buildingShadows[building.id]?.removeFromParent()
+            shadow = BuildingArtwork.makeGroundShadow(kind: building.kind, stage: stage)
+            shadow.name = key
+            buildingShadows[building.id] = shadow
+            shadowLayer.addChild(shadow)
+        }
+        shadow.position = layout.southCorner(halfWidth: halfWidth, halfHeight: halfHeight)
+        shadow.alpha = stage == .complete ? 1 : 0.55
     }
 
     private func buildingContainer(_ id: BuildingID, layout: IsoFootprintLayout) -> SKNode {
@@ -695,7 +720,22 @@ final class IslandScene: SKScene {
     private func configureTile(_ node: SKSpriteNode, x: Int32, y: Int32, map: WorldMap, signature: String) {
         let terrain = map.terrain(at: map.index(x: x, y: y))
         let groundName = MapArt.terrainName(terrain, x: x, y: y)
+        node.removeAction(forKey: "water-ripple")
         node.texture = MapArt.texture(named: groundName) ?? proceduralTile(terrain, road: false)
+        switch terrain {
+        case .water: node.color = UIColor(red: 0.08, green: 0.62, blue: 0.66, alpha: 1)
+        case .sand: node.color = UIColor(red: 0.96, green: 0.78, blue: 0.48, alpha: 1)
+        case .grass, .fertile: node.color = UIColor(red: 0.72, green: 0.76, blue: 0.38, alpha: 1)
+        case .rock: node.color = UIColor(red: 0.72, green: 0.65, blue: 0.53, alpha: 1)
+        }
+        node.colorBlendFactor = terrain == .water ? 0.12 : 0.07
+        if terrain == .water, !UIAccessibility.isReduceMotionEnabled,
+           let first = MapArt.texture(named: groundName), let next = MapArt.texture(named: "\(groundName)_f1") {
+            let delay = Double(MapArt.mix(x, y) % 4) * 0.22
+            node.run(.sequence([.wait(forDuration: delay),
+                                .repeatForever(.animate(with: [first, next], timePerFrame: 0.95, resize: false, restore: true))]),
+                     withKey: "water-ripple")
+        }
         node.size = MapArt.tileSize
         node.removeAllChildren()
         if map.isRoad(at: map.index(x: x, y: y)) {
@@ -811,7 +851,9 @@ final class IslandScene: SKScene {
         guard let state = renderedState else { return }
         animationTime = currentTime
         let phase = (currentTime / 100 + Double(state.day % 3) / 3).truncatingRemainder(dividingBy: 1)
-        nightLayer.alpha = CGFloat(0.07 + 0.25 * (1 - cos(phase * .pi * 2)) / 2)
+        let darkness = (1 - cos(phase * .pi * 2)) / 2
+        nightLayer.alpha = CGFloat(0.04 + 0.18 * darkness)
+        shadowLayer.alpha = CGFloat(1 - 0.35 * darkness)
         stepCrew(time: currentTime)
 
         let map = state.map

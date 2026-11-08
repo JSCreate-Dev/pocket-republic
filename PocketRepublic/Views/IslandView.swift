@@ -33,6 +33,7 @@ struct IslandView: View {
     @State private var placementReceipt: PlacementReceipt?
     @State private var roadReceipt: RoadReceipt?
     @State private var mapOverlay: MapOverlayMode = .standard
+    @State private var showLayerHelp = false
 
     var body: some View {
         GeometryReader { geometry in
@@ -108,6 +109,30 @@ struct IslandView: View {
                 scene.setFraming(framing)
             }
         }
+        .sheet(isPresented: $showRoadmap) {
+            CityReadingSheet("Republic Roadmap") {
+                DevelopmentRoadmap()
+                SeasonCard()
+            }
+        }
+        .sheet(isPresented: $showCharter) {
+            CityReadingSheet("Founding charter") { SeasonCard() }
+        }
+        .sheet(isPresented: $showLayerHelp) {
+            CityReadingSheet(mapOverlay.title) {
+                Text(mapOverlay.legend)
+                    .font(.body).frame(maxWidth: .infinity, alignment: .leading)
+                    .padding().dioramaCard()
+                Text("Layers show current simulation data. They do not spend money or change the city. Choose Normal map to restore the usual picture.")
+                    .font(.subheadline).foregroundStyle(RepublicTheme.inkSoft)
+            }
+        }
+        .task(id: unlockedBanner) {
+            guard let earned = unlockedBanner else { return }
+            try? await Task.sleep(for: .seconds(7))
+            guard !Task.isCancelled, unlockedBanner == earned else { return }
+            unlockedBanner = nil
+        }
         .onReceive(game.$state) { state in
             if let receipt = placementReceipt, state.map.buildingAt(receipt.anchor) != receipt.id {
                 placementReceipt = nil
@@ -129,6 +154,9 @@ struct IslandView: View {
             selectedBuildingID = nil
             selectedTile = nil
         }
+        .onChange(of: game.state.treasury) { _, _ in
+            if tool == .road { scene.setRoadPreview(roadMarks) }
+        }
         .onChange(of: mapOverlay) { _, mode in
             scene.setOverlay(mode)
         }
@@ -143,11 +171,11 @@ struct IslandView: View {
             }
             if !newTool.isBuilding { placeTile = nil }
             if newTool != .inspect { showCatalog = false }
-            clock.setModal(IslandSessionHold.buildToken, presented: newTool != .inspect)
+            clock.setModal(IslandSessionHold.buildToken, presented: false)
             configureTapHandler()
         }
         .onChange(of: showRoadmap) { _, shown in
-            clock.setModal("roadmap", presented: shown)
+            clock.setModal("roadmap", presented: false)
         }
         .onChange(of: game.state.development?.unlocked ?? []) { old, new in
             guard let earned = new.last(where: { !old.contains($0) }) else { return }
@@ -156,7 +184,7 @@ struct IslandView: View {
             UIAccessibility.post(notification: .announcement, argument: "Unlocked \(earned.title). \(earned.reward)")
         }
         .onChange(of: showCatalog) { _, shown in
-            clock.setModal(IslandSessionHold.catalogToken, presented: shown)
+            clock.setModal(IslandSessionHold.catalogToken, presented: false)
         }
         .onChange(of: islandVisible) { _, visible in
             if !visible { leaveBuildSession() }
@@ -186,14 +214,6 @@ struct IslandView: View {
 
     @ViewBuilder private func controls(in layout: CityDisplayLayout) -> some View {
         let scrolling = VStack(spacing: 8) {
-            if showRoadmap {
-                DevelopmentRoadmap().frame(maxWidth: layout.cardWidth)
-                Button("Founding charter & compacts") { showCharter.toggle() }
-                    .font(.caption.weight(.semibold)).frame(minHeight: 44)
-                Button("Close roadmap") { showRoadmap = false }
-                    .font(.caption).frame(minHeight: 44)
-            }
-            if showCharter { SeasonCard() }
             if let chip = attentionChip {
                 Button {
                     selectedAgendaID = chip.id
@@ -262,15 +282,17 @@ struct IslandView: View {
             }
             if layout.mapFirst {
                 if detailOpen {
-                    ScrollView(.vertical, showsIndicators: false) { scrolling }
+                    ScrollView(.vertical, showsIndicators: true) { scrolling }
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                 }
             } else if layout.scrollControls {
-                ScrollView(.vertical, showsIndicators: false) { scrolling }
+                ScrollView(.vertical, showsIndicators: true) { scrolling }
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             } else {
                 scrolling
             }
             if layout.mapFirst {
-                mapDock(wide: layout.controls.width >= 540)
+                mapDock(wide: layout.controls.width >= 640)
             } else {
                 dayClockControls
                     .padding(.horizontal, 8)
@@ -324,16 +346,23 @@ struct IslandView: View {
     }
 
     @ViewBuilder private var clockTools: some View {
+        Button {
+            clock.togglePause()
+        } label: {
+            Label(clock.policy.controlLabel, systemImage: clock.policy.pace == .paused ? "play.fill" : "pause.fill")
+                .frame(maxWidth: .infinity, minHeight: 44)
+        }
+        .buttonStyle(RepublicDockButton())
+        .accessibilityHint("Pauses or resumes automatic days")
         Menu {
-            Button("Paused") { clock.setPace(.paused) }
             Button("Leisurely · 6 seconds") { clock.setPace(.playing(DayClockPolicy.leisurely)) }
             Button("Steady · 3.5 seconds") { clock.setPace(.playing(DayClockPolicy.steady)) }
             Button("Brisk · 2 seconds") { clock.setPace(.playing(DayClockPolicy.brisk)) }
         } label: {
-            Label(clock.policy.controlLabel, systemImage: clock.policy.tickInterval == nil ? "pause.fill" : "play.fill")
-                .frame(maxWidth: .infinity, minHeight: 44)
+            Image(systemName: "speedometer").frame(minWidth: 44, minHeight: 44)
         }
         .buttonStyle(RepublicDockButton())
+        .accessibilityLabel("Day speed")
         Button { game.advance() } label: {
             Label("Next Day", systemImage: "forward.end.fill")
                 .frame(maxWidth: .infinity, minHeight: 44)
@@ -431,11 +460,13 @@ struct IslandView: View {
                 .accessibilityHint("Switches fertility, happiness, food access and job overlays")
             }
             if mapOverlay != .standard {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(mapOverlay.title).font(.caption.weight(.bold)).foregroundStyle(RepublicTheme.brass)
-                    Text(mapOverlay.legend).font(.caption2).fixedSize(horizontal: false, vertical: true)
-                    Text("Tap a tile to inspect its layer value. Layers never change the simulation.")
-                        .font(.caption2).foregroundStyle(RepublicTheme.paper.opacity(0.7))
+                HStack(spacing: 8) {
+                    Label(mapOverlay.title, systemImage: mapOverlay.symbol)
+                        .font(.caption.weight(.semibold)).foregroundStyle(RepublicTheme.brass)
+                    Spacer(minLength: 0)
+                    Button { showLayerHelp = true } label: {
+                        Image(systemName: "info.circle").frame(width: 44, height: 44)
+                    }.buttonStyle(.plain).accessibilityLabel("Explain \(mapOverlay.title) colors")
                 }
             }
             Button {
@@ -462,7 +493,7 @@ struct IslandView: View {
                 Label("\(hungryResidents) hungry · check market access and food", systemImage: "exclamationmark.triangle.fill")
                     .font(.caption2.weight(.semibold)).foregroundStyle(RepublicTheme.sand)
             }
-            if mapOverlay == .standard && game.saveIssue == nil && game.feedback == nil && !tool.isBuilding && hungryResidents == 0 {
+            if unlockedBanner == nil && mapOverlay == .standard && game.saveIssue == nil && game.feedback == nil && !tool.isBuilding && hungryResidents == 0 {
                 Text(developmentHint)
                     .font(.caption2).foregroundStyle(RepublicTheme.paper.opacity(0.72))
                     .lineLimit(2)
@@ -967,7 +998,7 @@ struct IslandView: View {
     }
 
     private var cardOpen: Bool {
-        showRoadmap || showCharter || showCatalog || selectedAgenda != nil || game.state.pending != nil || buildingInspection != nil
+        showCatalog || selectedAgenda != nil || game.state.pending != nil || buildingInspection != nil
     }
 
     private var detailOpen: Bool {
@@ -1129,7 +1160,7 @@ struct IslandView: View {
                     } label: {
                         VStack(spacing: 5) {
                             if let kind = option.buildingKind {
-                                Image("building_\(String(describing: kind))")
+                                Image(BuildingSpriteCatalog.spec(for: kind).imageName)
                                     .resizable().scaledToFit().frame(height: 46)
                                     .accessibilityHidden(true)
                                 Label(option.label, systemImage: DevelopmentTree.canBuild(kind, in: game.state) ? "hammer.fill" : "lock.fill")
@@ -1251,9 +1282,9 @@ private struct CityDisplayLayout {
             } else if cardOpen {
                 height = min(340, max(220, size.height * 0.40))
             } else if detailOpen {
-                height = size.width >= 540 ? 150 : 196
+                height = size.width >= 640 ? 150 : 196
             } else {
-                height = size.width >= 540 ? 76 : 128
+                height = size.width >= 640 ? 76 : 128
             }
             let panelHeight = min(size.height, max(0, height))
             focus = CGRect(x: 0, y: 0, width: size.width,
@@ -1400,4 +1431,39 @@ private struct RoadReceipt {
     let cost: Int
     let anchor: TileIndex
     let complete: Bool
+}
+
+
+/// Read-only content gets the whole sheet instead of a clipped slice above the dock.
+private struct CityReadingSheet<Content: View>: View {
+    let title: String
+    let content: Content
+    @Environment(\.dismiss) private var dismiss
+
+    init(_ title: String, @ViewBuilder content: () -> Content) {
+        self.title = title
+        self.content = content()
+    }
+
+    var body: some View {
+        NavigationStack {
+            ScrollView(.vertical, showsIndicators: true) {
+                VStack(alignment: .leading, spacing: 16) { content }
+                    .frame(maxWidth: 620)
+                    .padding(16)
+                    .frame(maxWidth: .infinity, alignment: .top)
+            }
+            .background(RepublicTheme.cream)
+            .foregroundStyle(RepublicTheme.ink)
+            .navigationTitle(title)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { dismiss() }
+                }
+            }
+        }
+        .presentationDetents([.large])
+        .presentationDragIndicator(.visible)
+    }
 }

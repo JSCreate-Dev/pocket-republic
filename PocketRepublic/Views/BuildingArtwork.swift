@@ -43,7 +43,7 @@ enum BuildingSpriteCatalog {
         case .house:
             return BuildingSpriteSpec(artTilesWide: 2, artTilesDeep: 2,
                                       pointSize: CGSize(width: 128, height: 125),
-                                      imageName: "building_house")
+                                      imageName: UIImage(named: "building_house_golden") == nil ? "building_house" : "building_house_golden")
         case .police:
             return BuildingSpriteSpec(artTilesWide: 2, artTilesDeep: 2,
                                       pointSize: CGSize(width: 128, height: 114),
@@ -140,6 +140,49 @@ enum BuildingArtwork {
         return texture
     }
 
+    /// Shared, blurred ground silhouettes. Footprint math and the bottom-front
+    /// anchor stay separate from the decorative shadow cast down/right.
+    static func makeGroundShadow(kind: BuildingKind, stage: ConstructionStage) -> SKSpriteNode {
+        let baseWidth = CGFloat(kind.footprint.width + kind.footprint.height) * 32
+        let baseHeight = baseWidth / 2
+        let bodyHeight = SiteSpriteCatalog.spec(kind: kind, stage: stage).size.height
+        let rise = max(8, bodyHeight - baseHeight)
+        let dx = max(8, rise * 0.55), dy = max(5, rise * 0.24)
+        let pad: CGFloat = 12
+        let size = CGSize(width: ceil(baseWidth + dx + pad * 2), height: ceil(baseHeight + dy + pad * 2))
+        let front = CGPoint(x: pad + baseWidth / 2, y: pad + baseHeight)
+        let key = "\(kind.rawValue)-\(stage)"
+        let texture: SKTexture
+        if let cached = groundShadows[key] { texture = cached }
+        else {
+            let format = UIGraphicsImageRendererFormat()
+            format.scale = 2
+            format.opaque = false
+            let image = UIGraphicsImageRenderer(size: size, format: format).image { context in
+                context.cgContext.setShadow(offset: .zero, blur: 6,
+                                            color: UIColor.black.withAlphaComponent(0.18).cgColor)
+                let path = UIBezierPath()
+                path.move(to: front)
+                path.addLine(to: CGPoint(x: front.x - baseWidth / 2, y: front.y - baseHeight / 2))
+                path.addLine(to: CGPoint(x: front.x, y: front.y - baseHeight))
+                path.addLine(to: CGPoint(x: front.x + baseWidth / 2, y: front.y - baseHeight / 2))
+                path.addLine(to: CGPoint(x: front.x + baseWidth / 2 + dx, y: front.y - baseHeight / 2 + dy))
+                path.addLine(to: CGPoint(x: front.x + dx, y: front.y + dy))
+                path.close()
+                UIColor.black.withAlphaComponent(0.2).setFill()
+                path.fill()
+            }
+            texture = SKTexture(image: image)
+            texture.filteringMode = .linear
+            groundShadows[key] = texture
+        }
+        let node = SKSpriteNode(texture: texture, size: size)
+        node.anchorPoint = CGPoint(x: front.x / size.width, y: 1 - front.y / size.height)
+        node.isUserInteractionEnabled = false
+        return node
+    }
+
+    private static var groundShadows: [String: SKTexture] = [:]
     private static var spriteTextures: [String: SKTexture] = [:]
     private static var markerTextures: [CGSizeKey: SKTexture] = [:]
 

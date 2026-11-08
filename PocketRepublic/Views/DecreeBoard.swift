@@ -291,7 +291,7 @@ struct DevelopmentRoadmap: View {
         if let node = nodes.first(where: { $0.id == id }) {
             VStack(alignment: .leading, spacing: 8) {
                 HStack(spacing: 10) {
-                    Image("building_\(String(describing: id.building))")
+                    Image(BuildingSpriteCatalog.spec(for: id.building).imageName)
                         .resizable().scaledToFit().frame(width: 48, height: 48)
                         .accessibilityHidden(true)
                     VStack(alignment: .leading, spacing: 3) {

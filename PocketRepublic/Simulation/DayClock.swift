@@ -1,4 +1,5 @@
 import Foundation
+import Combine
 import PocketRepublicCore
 
 /// When the app may call `Game.advance()` on a timer.
@@ -15,7 +16,7 @@ struct DayClockPolicy: Equatable {
     static let steady: TimeInterval = 3.5
     static let brisk: TimeInterval = 2
 
-    var pace: Pace = .paused
+    var pace: Pace = .playing(DayClockPolicy.leisurely)
     var sceneActive = true
     var modalHold = false
     var blockedByCrisis = false
@@ -24,7 +25,7 @@ struct DayClockPolicy: Equatable {
 
     /// Seconds until the next single advance, or nil when the clock must not fire.
     var tickInterval: TimeInterval? {
-        guard sceneActive, !modalHold, !blockedByCrisis, !islandEventWaiting, !saveBlocked else { return nil }
+        guard sceneActive, !modalHold, !blockedByCrisis, !saveBlocked else { return nil }
         guard case .playing(let seconds) = pace else { return nil }
         guard seconds >= 1.5, seconds <= 30, seconds.isFinite else { return nil }
         return seconds
@@ -34,10 +35,11 @@ struct DayClockPolicy: Equatable {
     var advancesPerTick: Int { tickInterval == nil ? 0 : 1 }
 
     var controlLabel: String {
-        guard tickInterval != nil else {
-            if case .playing = pace { return "\(paceLabel), held" }
-            return "Paused"
-        }
+        if case .paused = pace { return "Paused" }
+        if !sceneActive { return "Away" }
+        if saveBlocked { return "Save issue" }
+        if blockedByCrisis { return "Decision" }
+        if modalHold { return "Confirming" }
         return paceLabel
     }
 
@@ -64,14 +66,11 @@ struct DayClockPolicy: Equatable {
         if blockedByCrisis {
             return "Paused for a crisis or an election. The next day waits for that choice. Next Day is held too, and Play cannot skip it."
         }
-        if islandEventWaiting {
-            return "Paused while an island event is waiting, so it cannot lapse in the background. Choose an option, or press Next Day yourself."
-        }
         switch pace {
         case .paused:
             return "Paused. Next Day advances one sim-day. A speed repeats that same step on a timer. Construction changes on the day, not between days."
         case .playing(let seconds):
-            return "One sim-day every \(Self.spoken(seconds)) seconds, through the same advance as Next Day. It stops if you leave the app, open a confirmation, or an island event is waiting."
+            return "One sim-day every \(Self.spoken(seconds)) seconds, through the same advance as Next Day. It pauses for blocking crises, destructive confirmations, storage errors or leaving the app. Browsing and optional island events do not stop time."
         }
     }
 
@@ -89,9 +88,14 @@ final class DayClock: ObservableObject {
     private var generation = 0
     private var game: Game?
     private var modalTokens: Set<String> = []
+    private var resumeInterval = DayClockPolicy.leisurely
 
     func attach(_ game: Game) {
         self.game = game
+        note(game)
+        // A default-playing policy may have identical flags on first attach;
+        // note's equality guard must not prevent the first timer from starting.
+        reschedule()
     }
 
     func note(_ game: Game) {
@@ -107,7 +111,13 @@ final class DayClock: ObservableObject {
     func setPace(_ pace: DayClockPolicy.Pace) {
         guard policy.pace != pace else { return }
         policy.pace = pace
+        if case .playing(let seconds) = pace { resumeInterval = seconds }
         reschedule()
+    }
+
+    func togglePause() {
+        if case .paused = policy.pace { setPace(.playing(resumeInterval)) }
+        else { setPace(.paused) }
     }
 
     func setSceneActive(_ active: Bool) {
