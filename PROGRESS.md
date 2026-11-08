@@ -12,7 +12,13 @@ Jordan wants Pocket Republic to feel like a lively, living world with a real gam
 
 ## Current state
 
-Code snapshot: map-first controls, cut from main `1bab3cf` (PR #29, the season and three origins). That main **Build iOS IPA** passed: [run 42441190337](https://github.com/JSCreate-Dev/pocket-republic/actions/runs/42441190337), **116 tests, 0 failures** (199.854 seconds). The unsigned IPA is artifact `13601748346` (`PocketRepublic-unsigned-ipa`, 5,453,632 bytes, expires 2027-02-06T03:05:02Z). Signed upload was skipped. This branch does not change the simulation. No iPhone run is claimed for the new controls.
+Game Logic first playable settlement pass, off main `97c1a2c` (PR #31). Ordinary new cities now begin with **16 residents, four houses, a town hall, one market, one farm and one workshop**, $1,600 and a short central street network. Clinics, schools, police, the dock and island-wide roads are earned through play. Explicit `citizenCount` generation remains the established-city fixture used by the existing economy and scale tests. Existing saves keep their cities.
+
+New cities save optional `BalanceConfig.settlementGrowth`: every fourth day, up to two newcomers can arrive when an open house has reachable job vacancies and a stocked market with two days of food for the resulting population. Existing residents get first chance at jobs. Construction sites do not count. Hunger or average happiness below 40 stops arrivals. Newcomers bring $40 each through an external ledger transfer and generate a Gazette arrival event. No new save schema is required; missing growth settings stay nil on old saves.
+
+Walker schedules vary by occupation, citizen and simulation day. Older residents periodically visit reachable clinics; discontented residents sometimes visit the hall; fed residents sometimes make an evening market visit. Routes are still legal road paths, cosmetic, deterministic and independent of saved RNG. This is not the full citizen-minds system: there are no new persistent needs, job quitting, traffic, leisure buildings or protest art yet.
+
+Verified locally with Swift 6.2 release: **130 tests, zero failures**, 5.932 seconds. The added tests cover six opening seeds, unmet growth requirements, unfinished housing, automatic job finding, need-driven trips, ledger conservation, save/load continuation and varied legal routines. Six opening days are hunger-free on seed 2026; unemployment later consumes savings, so opening jobs matters. iOS CI and a phone playtest remain necessary. The companion UI work is separate and not included in this branch.
 
 PR #24 remains the construction clock in the core: foundation, scaffold, complete, in whole sim-days. PR #26 draws those stages. PR #27 did not retune build times. A demolished building is no longer a ghost workplace: `isStanding(on:)` is the economy gate, and `visibleBuildings` omits rubble. Sites still draw, because they own their tiles.
 

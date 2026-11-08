@@ -4,6 +4,9 @@ import Foundation
 /// Balance is data, not code: the design lead tunes this struct without touching
 /// engine logic, and a config can be serialised next to a seed to reproduce a run.
 public struct BalanceConfig: Codable, Sendable, Equatable {
+    /// Missing on older saves and explicit population fixtures: no automatic arrivals.
+    public var settlementGrowth: SettlementGrowthConfig? = nil
+
     // Production
     public var farmYieldPerWorker: Int32 = 5
     public var fertileBonus: Int32 = 2
@@ -172,4 +175,14 @@ public struct EventPacing: Codable, Sendable, Equatable {
         toneBalanceMultiplier: 2,
         expiryDays: 3
     )
+}
+
+/// New-city growth rules are saved with the city; existing saves remain unchanged.
+public struct SettlementGrowthConfig: Codable, Sendable, Equatable {
+    public var arrivalIntervalDays: Int32 = 4
+    public var arrivalsPerWave: Int32 = 2
+    public var foodReserveDays: Int32 = 2
+    public var minimumHappiness: Int32 = 40
+    public var newcomerMoney: Int64 = 40
+    public init() {}
 }

@@ -5,7 +5,7 @@ import XCTest
 final class SeasonTests: XCTestCase {
 
     func testFreshCityOmitsTheSeasonAndStillMatchesItsHash() throws {
-        let state = WorldGenerator.generate(seed: 2026)
+        let state = WorldGenerator.generate(seed: 2026, citizenCount: 120)
         XCTAssertNil(state.republicSeason)
         XCTAssertEqual(RepublicSeasonBook.status(in: state).beat, .breakGround)
         XCTAssertFalse(RepublicSeasonBook.status(in: state).foundingReady)
@@ -18,7 +18,7 @@ final class SeasonTests: XCTestCase {
     }
 
     func testFoundingPaysOnceAndASecondClaimDoesNot() {
-        var state = WorldGenerator.generate(seed: 11)
+        var state = WorldGenerator.generate(seed: 11, citizenCount: 120)
         let before = state.treasury
         XCTAssertEqual(SimulationEngine.apply(.advanceSeason(.claimFounding), to: &state),
                        .rejected(.seasonNotReady))
@@ -62,7 +62,7 @@ final class SeasonTests: XCTestCase {
     }
 
     func testGranaryFeedsMoreAndCostsMoreUpkeep() {
-        var plain = WorldGenerator.generate(seed: 11)
+        var plain = WorldGenerator.generate(seed: 11, citizenCount: 120)
         advance(&plain, days: 1)
         var granary = plain
         granary.republicSeason = RepublicSeason(foundingClaimed: true, path: .granary, settledClaimed: false)
@@ -83,7 +83,7 @@ final class SeasonTests: XCTestCase {
     }
 
     func testHarborEarnsMoreAndSpoilsMore() {
-        var plain = WorldGenerator.generate(seed: 11)
+        var plain = WorldGenerator.generate(seed: 11, citizenCount: 120)
         advance(&plain, days: 1)
         var harbor = plain
         harbor.republicSeason = RepublicSeason(foundingClaimed: true, path: .harbor, settledClaimed: false)
@@ -104,7 +104,7 @@ final class SeasonTests: XCTestCase {
     }
 
     func testPlaythroughReachesSettledExactlyOnce() {
-        var state = WorldGenerator.generate(seed: 2026)
+        var state = WorldGenerator.generate(seed: 2026, citizenCount: 120)
         print("SEASON start day \(state.day) treasury \(state.treasury) kinds \(RepublicSeasonBook.playerOpenKinds(in: state).count)")
         place(.house, in: &state)
         XCTAssertEqual(SimulationEngine.apply(.advanceSeason(.claimFounding), to: &state),
@@ -143,7 +143,7 @@ final class SeasonTests: XCTestCase {
     }
 
     private func claimedFounding(seed: UInt64) -> RepublicState {
-        var state = WorldGenerator.generate(seed: seed)
+        var state = WorldGenerator.generate(seed: seed, citizenCount: 120)
         place(.house, in: &state)
         advance(&state, days: 2)
         _ = SimulationEngine.apply(.advanceSeason(.claimFounding), to: &state)

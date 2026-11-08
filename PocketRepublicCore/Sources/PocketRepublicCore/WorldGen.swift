@@ -19,10 +19,15 @@ public enum WorldGenerator {
     ]
 
     public static func generate(seed: UInt64,
-                                citizenCount: Int = 120,
+                                citizenCount requestedCount: Int? = nil,
                                 size: Int32 = 64,
                                 config: BalanceConfig = BalanceConfig(),
                                 origin: RepublicOrigin? = nil) -> RepublicState {
+        // An explicit count retains the established-city simulation fixture.
+        // Ordinary app starts omit it and begin with a settlement to grow.
+        let settlement = requestedCount == nil
+        let citizenCount = requestedCount ?? 16
+        precondition(size >= 32, "World generation needs room for legal footprints")
         var map = WorldMap(width: size, height: size)
         var rng = SeededRNG(seed: seed ^ 0xA5A5_1234_DEAD_BEEF)
 
@@ -65,7 +70,11 @@ public enum WorldGenerator {
         for y in 5..<(size - 5) {
             for x in 5..<(size - 5) {
                 guard map.terrain(at: map.index(x: x, y: y)).buildable else { continue }
-                if x % 6 == 2 || y % 6 == 2 { map.road[Int(map.index(x: x, y: y).raw)] = true }
+                let local = abs(x - size / 2) <= 9 && abs(y - size / 2) <= 9
+                let street = settlement
+                    ? ((x - size / 2) % 6 == 0 || (y - size / 2) % 6 == 0) && local
+                    : x % 6 == 2 || y % 6 == 2
+                if street { map.road[Int(map.index(x: x, y: y).raw)] = true }
             }
         }
 
@@ -76,51 +85,61 @@ public enum WorldGenerator {
         let mid = size / 2
         _ = place(&state, .townHall, near: state.map.index(x: mid, y: mid))
 
-        // Every district gets a market. A starting city that is already in permanent
-        // crisis is untunable; pressure should come from the player outgrowing the
-        // services, not from day one. Clinics, schools and police are deliberately
-        // sparser, so coverage gaps exist to be noticed and fixed.
-        for d in state.districts {
-            _ = place(&state, .market, near: d.centroid)
-        }
-        for i in [0, 4, 8] {
-            _ = place(&state, .clinic, near: state.districts[i].centroid)
-        }
-        for i in [1, 7] {
-            _ = place(&state, .school, near: state.districts[i].centroid)
-        }
-        for i in [0, 2, 4, 6, 8] {
-            _ = place(&state, .police, near: state.districts[i].centroid)
-        }
-        // Dock is 2×3 with no rotation, so its long sides face east and west.
-        // Park the right edge on the eastern water margin.
-        let dockX = size - 5
-        let dockY = (mid / 6) * 6 + 2
-        _ = place(&state, .dock, near: state.map.index(x: dockX, y: dockY))
-
-        let farmCount = max(5, citizenCount / 14)
-        for _ in 0..<farmCount {
-            let x = Int32(rng.int(7...Int(size - 8)))
-            let y = Int32(rng.int(7...Int(size - 8)))
-            _ = place(&state, .farm, near: state.map.index(x: x, y: y))
-        }
-        let workshopCount = max(4, citizenCount / 9)
-        for _ in 0..<workshopCount {
-            let x = Int32(rng.int(8...Int(size - 9)))
-            let y = Int32(rng.int(8...Int(size - 9)))
-            _ = place(&state, .workshop, near: state.map.index(x: x, y: y))
-        }
-
-        // Housing to cover the starting population.
-        var housed: Int32 = 0
-        var attempt: Int32 = 0
-        while housed < Int32(citizenCount) && attempt < Int32(citizenCount) * 8 {
-            let x = Int32(rng.int(6...Int(size - 7)))
-            let y = Int32(rng.int(6...Int(size - 7)))
-            if let id = place(&state, .house, near: state.map.index(x: x, y: y)) {
-                housed += state.buildings[Int(id.raw)].kind.housingCapacity
+        if settlement {
+            let centre = state.map.index(x: mid, y: mid)
+            _ = place(&state, .market, near: centre)
+            _ = place(&state, .farm, near: centre)
+            _ = place(&state, .workshop, near: centre)
+            for _ in 0..<4 { _ = place(&state, .house, near: centre) }
+            state.config.settlementGrowth = SettlementGrowthConfig()
+        } else {
+            // Every district gets a market. A starting city that is already in permanent
+            // crisis is untunable; pressure should come from the player outgrowing the
+            // services, not from day one. Clinics, schools and police are deliberately
+            // sparser, so coverage gaps exist to be noticed and fixed.
+            for d in state.districts {
+                _ = place(&state, .market, near: d.centroid)
             }
-            attempt += 1
+            for i in [0, 4, 8] {
+                _ = place(&state, .clinic, near: state.districts[i].centroid)
+            }
+            for i in [1, 7] {
+                _ = place(&state, .school, near: state.districts[i].centroid)
+            }
+            for i in [0, 2, 4, 6, 8] {
+                _ = place(&state, .police, near: state.districts[i].centroid)
+            }
+            // Dock is 2×3 with no rotation, so its long sides face east and west.
+            // Park the right edge on the eastern water margin.
+            let dockX = size - 5
+            let dockY = (mid / 6) * 6 + 2
+            _ = place(&state, .dock, near: state.map.index(x: dockX, y: dockY))
+
+            let farmCount = max(5, citizenCount / 14)
+            for _ in 0..<farmCount {
+                let x = Int32(rng.int(7...Int(size - 8)))
+                let y = Int32(rng.int(7...Int(size - 8)))
+                _ = place(&state, .farm, near: state.map.index(x: x, y: y))
+            }
+            let workshopCount = max(4, citizenCount / 9)
+            for _ in 0..<workshopCount {
+                let x = Int32(rng.int(8...Int(size - 9)))
+                let y = Int32(rng.int(8...Int(size - 9)))
+                _ = place(&state, .workshop, near: state.map.index(x: x, y: y))
+            }
+
+            // Housing to cover the starting population.
+            var housed: Int32 = 0
+            var attempt: Int32 = 0
+            while housed < Int32(citizenCount) && attempt < Int32(citizenCount) * 8 {
+                let x = Int32(rng.int(6...Int(size - 7)))
+                let y = Int32(rng.int(6...Int(size - 7)))
+                if let id = place(&state, .house, near: state.map.index(x: x, y: y)) {
+                    housed += state.buildings[Int(id.raw)].kind.housingCapacity
+                }
+                attempt += 1
+            }
+
         }
 
         // Citizens, assigned to homes in a fixed order.
@@ -145,7 +164,7 @@ public enum WorldGenerator {
         }
 
         // Opening balances. Everything after this point is conserved.
-        state.treasury = 4000
+        state.treasury = settlement ? 1600 : 4000
         for i in state.buildings.indices where !state.buildings[i].kind.isCivic {
             state.buildings[i].funds = 60
         }

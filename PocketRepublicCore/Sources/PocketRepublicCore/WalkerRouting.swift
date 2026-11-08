@@ -91,7 +91,7 @@ public enum Pathfinder {
 /// food from, then home again. Hours are 0..<24 inside the simulated day.
 public struct DailyRoutine: Equatable, Sendable {
     public enum Stop: String, Equatable, Sendable {
-        case home, work, market
+        case home, work, market, clinic, civic, leisure
     }
 
     public var stops: [Stop]
@@ -140,7 +140,8 @@ public enum WalkerRoutine {
         }
         var stops: [DailyRoutine.Stop] = [.home]
         var doors = [homeDoor]
-        if let work = citizen.work, let door = access.entrance(of: work) {
+        if let work = citizen.work, state.buildings[Int(work.raw)].isStanding(on: state.map),
+           let door = access.entrance(of: work) {
             stops.append(.work)
             doors.append(door)
         }
@@ -150,6 +151,31 @@ public enum WalkerRoutine {
             stops.append(.market)
             doors.append(door)
         }
+        // Purposeful extra trips. Older residents visit a clinic periodically;
+        // discontented residents gather at the hall; others sometimes socialise.
+        // The seed/identity/day offset varies the day without consuming saved RNG.
+        let phase = (UInt64(citizen.id.raw) &+ state.worldSeed &+ UInt64(max(0, state.day))) % 5
+        let visit: (BuildingKind, DailyRoutine.Stop)?
+        if citizen.age >= 55 && phase == 0 { visit = (.clinic, .clinic) }
+        else if citizen.loyalty < 30 && phase < 2 { visit = (.townHall, .civic) }
+        else if citizen.daysHungry == 0 && phase == 2 { visit = (.market, .leisure) }
+        else { visit = nil }
+        if let (kind, purpose) = visit {
+            let candidates = state.buildings.filter { $0.kind == kind && $0.isStanding(on: state.map) }
+                .sorted {
+                    let a = SimulationEngine.manhattan(state.map, homeDoor, $0.tile)
+                    let b = SimulationEngine.manhattan(state.map, homeDoor, $1.tile)
+                    return a == b ? $0.id.raw < $1.id.raw : a < b
+                }
+            if let destination = candidates.first(where: { building in
+                guard let door = access.entrance(of: building.id) else { return false }
+                let route = Pathfinder.path(from: homeDoor, to: door, map: state.map, access: access)
+                return route.last == door && route.count <= Int(state.config.maxServiceDistance) + 1
+            }), let door = access.entrance(of: destination.id) {
+                stops.append(purpose)
+                doors.append(door)
+            }
+        }
         if stops.count == 1 {
             return DailyRoutine(stops: [.home], entrances: [homeDoor],
                                 dwellStart: [0], dwellEnd: [24], legPaths: [], path: [homeDoor])
@@ -157,7 +183,7 @@ public enum WalkerRoutine {
         stops.append(.home)
         doors.append(homeDoor)
 
-        let (dwellStart, dwellEnd) = dwells(for: stops)
+        let (dwellStart, dwellEnd) = dwells(for: stops, citizen: citizen, day: state.day)
         var legs: [[TileIndex]] = []
         var full: [TileIndex] = []
         for i in 1..<doors.count {
@@ -170,26 +196,30 @@ public enum WalkerRoutine {
                             dwellEnd: dwellEnd, legPaths: legs, path: full)
     }
 
-    /// Home through the early morning, work through the middle of the day when
-    /// they have a job, market after work (or mid-morning if they do not), home at night.
-    static func dwells(for stops: [DailyRoutine.Stop]) -> (start: [Int], end: [Int]) {
+    /// Different occupations start at different hours. Individual and daily
+    /// offsets keep the town from moving in lockstep; all gaps remain travel.
+    static func dwells(for stops: [DailyRoutine.Stop], citizen: Citizen, day: Int32) -> (start: [Int], end: [Int]) {
+        let hasWork = stops.contains(.work)
+        let hasVisit = stops.contains(.clinic) || stops.contains(.civic) || stops.contains(.leisure)
+        let shift = Int((Int64(citizen.id.raw) + Int64(max(0, day))) % 3) - 1
+        let early = citizen.occupation == .farmer || citizen.occupation == .dockhand
+        let workStart = (early ? 7 : 8) + shift
         var start: [Int] = []
         var end: [Int] = []
-        let hasWork = stops.contains(.work)
-        let hasMarket = stops.contains(.market)
         for stop in stops {
             switch stop {
             case .home where start.isEmpty:
-                start.append(0)
-                end.append(7)
+                start.append(0); end.append(hasWork ? workStart - 1 : 7 + shift)
             case .work:
-                start.append(8)
-                end.append(hasMarket ? 15 : 16)
+                start.append(workStart); end.append(14 + shift)
             case .market:
-                start.append(hasWork ? 16 : 8)
-                end.append(hasWork ? 18 : 12)
+                start.append(hasWork ? 16 + shift : 9 + shift)
+                end.append(hasWork ? 17 + shift : 11 + shift)
+            case .clinic, .civic, .leisure:
+                start.append(hasWork ? 19 : 14 + shift)
+                end.append(hasWork ? 21 : 17 + shift)
             case .home:
-                start.append(hasWork && hasMarket ? 20 : (hasMarket ? 14 : 18))
+                start.append(hasVisit ? (hasWork ? 22 : 19 + shift) : (hasWork ? 20 : 14 + shift))
                 end.append(24)
             }
         }

@@ -7,13 +7,13 @@ final class WalkerRoutineTests: XCTestCase {
         let (state, citizen) = try employedShopper()
         let access = state.buildingAccess()
         let routine = WalkerRoutine.plan(for: citizen, in: state, access: access)
-        XCTAssertEqual(routine.stops, [.home, .work, .market, .home])
+        XCTAssertEqual(routine.stops.filter { [.home, .work, .market].contains($0) }, [.home, .work, .market, .home])
         XCTAssertEqual(routine.tile(atHour: 0), routine.entrances[0])
-        XCTAssertEqual(routine.tile(atHour: 6), routine.entrances[0])
+        XCTAssertEqual(routine.tile(atHour: 3), routine.entrances[0])
         XCTAssertEqual(routine.tile(atHour: 10), routine.entrances[1])
-        XCTAssertEqual(routine.tile(atHour: 16), routine.entrances[2])
-        XCTAssertEqual(routine.tile(atHour: 23), routine.entrances[3])
-        XCTAssertEqual(routine.entrances[0], routine.entrances[3])
+        XCTAssertEqual(routine.tile(atHour: routine.dwellStart[2]), routine.entrances[2])
+        XCTAssertEqual(routine.tile(atHour: 23), routine.entrances.last!)
+        XCTAssertEqual(routine.entrances[0], routine.entrances.last!)
         XCTAssertNotEqual(routine.entrances[0], routine.entrances[1])
         XCTAssertNotEqual(routine.entrances[1], routine.entrances[2])
 
@@ -23,7 +23,7 @@ final class WalkerRoutineTests: XCTestCase {
                        "the market stop is the entrance of the market this citizen buys from")
         XCTAssertEqual(routine, WalkerRoutine.plan(for: citizen, in: state, access: access))
 
-        let travel = routine.tile(atHour: 7)
+        let travel = routine.tile(atHour: routine.dwellEnd[0])
         XCTAssertTrue(routine.legPaths[0].contains(travel))
         XCTAssertNotEqual(routine.stops, [.home, .work, .home])
     }
@@ -33,17 +33,17 @@ final class WalkerRoutineTests: XCTestCase {
         var idle = citizen
         idle.work = nil
         let routine = WalkerRoutine.plan(for: idle, in: state, access: state.buildingAccess())
-        XCTAssertEqual(routine.stops, [.home, .market, .home])
+        XCTAssertEqual(routine.stops.filter { [.home, .work, .market].contains($0) }, [.home, .market, .home])
         XCTAssertFalse(routine.stops.contains(.work))
-        XCTAssertEqual(routine.tile(atHour: 9), routine.entrances[1])
-        XCTAssertEqual(routine.tile(atHour: 22), routine.entrances[2])
+        XCTAssertEqual(routine.tile(atHour: routine.dwellStart[1]), routine.entrances[1])
+        XCTAssertEqual(routine.tile(atHour: 22), routine.entrances.last!)
     }
 
     func testNoMarketWhenTheDoorIsOutOfRange() throws {
         var (state, citizen) = try employedShopper()
         state.config.maxServiceDistance = 0
         let routine = WalkerRoutine.plan(for: citizen, in: state, access: state.buildingAccess())
-        XCTAssertEqual(routine.stops, [.home, .work, .home])
+        XCTAssertEqual(routine.stops.filter { [.home, .work, .market].contains($0) }, [.home, .work, .home])
         XCTAssertFalse(routine.stops.contains(.market))
     }
 
