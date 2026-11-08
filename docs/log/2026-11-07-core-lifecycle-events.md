@@ -51,7 +51,9 @@ Construction stages, build times, and `advanceConstruction` were not retuned.
 
 That is the previous 88 plus 12: 3 lifecycle, 8 island-event, 1 service-cap. The new tests cover ghost upkeep, a workplace that must not hire or pay, a demolished market and clinic dropping out of the distance fields and out of `WalkerRoutine`, deck bounds, a rejected option and an unaffordable gala, food export at full price and at half when the stall is short, lapse applying only the free option, one card at a time, the repeat window, save/load of the event stream, two seeds diverging, the wellbeing RNG staying put when the event chance is 0, and a fresh save omitting `islandEventLog`, `eventPacing`, `foodExport`, and `islandEventID`.
 
-Seed 2026, 250 citizens, 200 days, from `EconomyReportTests`: food 476 produced against 250 needed (ratio 1.90), **hungry 0**, every district at 100% market coverage. North Fields unrest was 83 with market coverage still 100. Debug timing, not the core README's release figure (the same run measured about 13 ms/tick at 1000 citizens). No iPhone. CI on this commit is the iOS compile.
+Seed 2026, 250 citizens, 200 days, from `EconomyReportTests`: food 476 produced against 250 needed (ratio 1.90), **hungry 0**, every district at 100% market coverage. North Fields unrest was 83 with market coverage still 100. Debug timing, not the core README's release figure (the same run measured about 13 ms/tick at 1000 citizens). No iPhone.
+
+**Build iOS IPA** on `30e6b89` succeeded: [run 42427776978](https://github.com/JSCreate-Dev/pocket-republic/actions/runs/42427776978). The core test step and the unsigned device build both passed. Signed upload was skipped (no Apple secrets).
 
 ## Not done
 
