@@ -47,14 +47,16 @@ extension RepublicState {
 
 public enum Pathfinder {
     /// Shortest walk under `access.isPassable`. Neighbour order is the map's
-    /// fixed west, east, north, south, so the same grid always yields the same path.
+    /// fixed west, east, north, south by default. A nonzero variation rotates
+    /// equal-distance choices deterministically without taking longer detours.
     public static func path<A: BuildingAccess>(from start: TileIndex, to end: TileIndex,
-                                               map: WorldMap, access: A) -> [TileIndex] {
+                                               map: WorldMap, access: A, variation: UInt64 = 0) -> [TileIndex] {
         if start == end { return [start] }
         let n = map.tileCount
         guard Int(start.raw) >= 0, Int(start.raw) < n, Int(end.raw) >= 0, Int(end.raw) < n else {
             return [start]
         }
+        guard access.isPassable(end) else { return [start] }
         var parent = [Int32](repeating: -1, count: n)
         parent[Int(start.raw)] = start.raw
         var queue = [Int32](repeating: 0, count: n)
@@ -65,10 +67,13 @@ public enum Pathfinder {
             let cur = queue[head]
             head += 1
             if cur == end.raw { break }
-            for next in map.neighbours(of: TileIndex(cur)) {
+            let neighbours = map.neighbours(of: TileIndex(cur))
+            let offset = variation == 0 ? 0 : Int((variation &+ UInt64(cur)) % UInt64(max(1, neighbours.count)))
+            for index in neighbours.indices {
+                let next = neighbours[(index + offset) % neighbours.count]
                 let ni = Int(next.raw)
                 guard parent[ni] < 0 else { continue }
-                guard next == end || access.isPassable(next) else { continue }
+                guard access.isPassable(next) else { continue }
                 parent[ni] = cur
                 queue[tail] = next.raw
                 tail += 1
@@ -140,16 +145,23 @@ public enum WalkerRoutine {
         }
         var stops: [DailyRoutine.Stop] = [.home]
         var doors = [homeDoor]
+        // A stop is meaningful only if the citizen can actually reach it from
+        // the previous destination. Never animate a jump across a broken road.
+        func append(_ stop: DailyRoutine.Stop, door: TileIndex) {
+            guard door != doors.last else { return }
+            let route = Pathfinder.path(from: doors.last!, to: door, map: state.map, access: access)
+            guard route.last == door else { return }
+            stops.append(stop)
+            doors.append(door)
+        }
         if let work = citizen.work, state.buildings[Int(work.raw)].isStanding(on: state.map),
            let door = access.entrance(of: work) {
-            stops.append(.work)
-            doors.append(door)
+            append(.work, door: door)
         }
         let homeTile = state.buildings[Int(home.raw)].tile
         if let market = SimulationEngine.shoppingMarket(state, homeTile: homeTile),
            let door = access.entrance(of: market) {
-            stops.append(.market)
-            doors.append(door)
+            append(.market, door: door)
         }
         // Purposeful extra trips. Older residents visit a clinic periodically;
         // discontented residents gather at the hall; others sometimes socialise.
@@ -172,8 +184,7 @@ public enum WalkerRoutine {
                 let route = Pathfinder.path(from: homeDoor, to: door, map: state.map, access: access)
                 return route.last == door && route.count <= Int(state.config.maxServiceDistance) + 1
             }), let door = access.entrance(of: destination.id) {
-                stops.append(purpose)
-                doors.append(door)
+                append(purpose, door: door)
             }
         }
         if stops.count == 1 {
@@ -187,7 +198,12 @@ public enum WalkerRoutine {
         var legs: [[TileIndex]] = []
         var full: [TileIndex] = []
         for i in 1..<doors.count {
-            let leg = Pathfinder.path(from: doors[i - 1], to: doors[i], map: state.map, access: access)
+            // Stable per citizen, day and leg. Equal-length routes vary without
+            // consuming saved RNG or changing shortest-path service distances.
+            let variation = state.worldSeed &+ UInt64(max(0, citizen.id.raw)) &* 31
+                &+ UInt64(max(0, state.day)) &* 17 &+ UInt64(i) &* 7 &+ 1
+            let leg = Pathfinder.path(from: doors[i - 1], to: doors[i], map: state.map,
+                                      access: access, variation: variation)
             legs.append(leg)
             if full.isEmpty { full = leg }
             else { full.append(contentsOf: leg.dropFirst()) }

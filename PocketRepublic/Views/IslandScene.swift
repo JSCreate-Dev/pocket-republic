@@ -17,7 +17,15 @@ final class IslandScene: SKScene {
     private var overlayMarker: SKTexture?
     private let peopleLayer = SKNode()
     private let cameraNode = SKCameraNode()
-    private let nightLayer = SKSpriteNode(color: .black, size: .zero)
+    private let nightLayer = SKSpriteNode(color: UIColor(red: 0.06, green: 0.10, blue: 0.22, alpha: 1), size: .zero)
+    private let sunlightLayer = SKSpriteNode(color: UIColor(red: 1, green: 0.65, blue: 0.28, alpha: 1), size: .zero)
+    private let vignetteLayer = SKSpriteNode()
+    private let entryLightLayer = SKNode()
+    private var entryLights: [BuildingID: SKSpriteNode] = [:]
+    private var lightingElapsed: TimeInterval = 0
+    private var previousLightingFrame: TimeInterval?
+    private var previousLightingUpdate: TimeInterval = -.infinity
+    private var reducedLightingMotion = UIAccessibility.isReduceMotionEnabled
     private var renderedState: RepublicState?
     private var tileNodes: [Int32: SKSpriteNode] = [:]
     private var buildingNodes: [BuildingID: SKNode] = [:]
@@ -67,6 +75,8 @@ final class IslandScene: SKScene {
         terrainLayer.zPosition = 0
         reachLayer.zPosition = 5
         shadowLayer.zPosition = 2
+        entryLightLayer.zPosition = 3
+        entryLightLayer.alpha = 0
         overlayLayer.zPosition = 4
         buildingLayer.zPosition = 10
         selectionLayer.zPosition = 15
@@ -74,6 +84,7 @@ final class IslandScene: SKScene {
         peopleLayer.zPosition = 30
         addChild(terrainLayer)
         addChild(shadowLayer)
+        addChild(entryLightLayer)
         addChild(overlayLayer)
         addChild(reachLayer)
         addChild(buildingLayer)
@@ -82,7 +93,16 @@ final class IslandScene: SKScene {
         addChild(peopleLayer)
         addChild(cameraNode)
         camera = cameraNode
+        sunlightLayer.zPosition = 95
+        sunlightLayer.blendMode = .add
+        sunlightLayer.alpha = 0.035
+        cameraNode.addChild(sunlightLayer)
+        vignetteLayer.texture = Self.radialTexture(vignette: true)
+        vignetteLayer.zPosition = 101
+        vignetteLayer.alpha = 0.08
+        cameraNode.addChild(vignetteLayer)
         nightLayer.zPosition = 100
+        nightLayer.alpha = 0.02
         cameraNode.addChild(nightLayer)
         resizeNightLayer()
     }
@@ -139,6 +159,9 @@ final class IslandScene: SKScene {
         }
         if presentedSeed != state.worldSeed {
             resetConstructionPresentation()
+            lightingElapsed = 0
+            previousLightingFrame = nil
+            previousLightingUpdate = -.infinity
             routines.removeAll()
             selectedBuildingID = nil
             presentedSeed = state.worldSeed
@@ -300,12 +323,14 @@ final class IslandScene: SKScene {
             siteLayouts[building.id] = layout
             presentBuilding(building, layout: layout, config: state.config)
             presentShadow(building, layout: layout, config: state.config)
+            presentEntryLight(building, map: map)
         }
         let goneBuildings = buildingNodes.keys.filter { !wantedBuildings.contains($0) }
         for id in goneBuildings {
             buildingNodes[id]?.removeFromParent()
             buildingNodes.removeValue(forKey: id)
             buildingShadows.removeValue(forKey: id)?.removeFromParent()
+            entryLights.removeValue(forKey: id)?.removeFromParent()
             siteLayouts.removeValue(forKey: id)
         }
         refreshPeople(state: state, rect: rect)
@@ -322,6 +347,9 @@ final class IslandScene: SKScene {
         terrainLayer.alpha = diagnostic ? 0.7 : 1
         peopleLayer.alpha = diagnostic ? 0.75 : 1
         nightLayer.isHidden = diagnostic
+        sunlightLayer.isHidden = diagnostic
+        vignetteLayer.isHidden = diagnostic
+        entryLightLayer.isHidden = diagnostic
         shadowLayer.isHidden = diagnostic
         refreshVisible(force: true)
     }
@@ -380,6 +408,8 @@ final class IslandScene: SKScene {
         buildingNodes.removeAll()
         shadowLayer.removeAllChildren()
         buildingShadows.removeAll()
+        entryLightLayer.removeAllChildren()
+        entryLights.removeAll()
         siteLayouts.removeAll()
         siteVisuals.removeAll()
         presentationPrimed = false
@@ -850,10 +880,7 @@ final class IslandScene: SKScene {
     override func update(_ currentTime: TimeInterval) {
         guard let state = renderedState else { return }
         animationTime = currentTime
-        let phase = (currentTime / 100 + Double(state.day % 3) / 3).truncatingRemainder(dividingBy: 1)
-        let darkness = (1 - cos(phase * .pi * 2)) / 2
-        nightLayer.alpha = CGFloat(0.04 + 0.18 * darkness)
-        shadowLayer.alpha = CGFloat(1 - 0.35 * darkness)
+        updateLighting(at: currentTime)
         stepCrew(time: currentTime)
 
         let map = state.map
@@ -873,6 +900,15 @@ final class IslandScene: SKScene {
         guard let pose = walkerPose(routine, at: localTime, map: map) else { return }
         node.position = pose.position
         node.zPosition = pose.sort
+        // Residents enter their home/workplace instead of standing on its
+        // doorstep for the whole shift. Public stops retain visible visitors.
+        let hour = localTime.truncatingRemainder(dividingBy: MapArt.visualDay) / MapArt.secondsPerHour
+        let indoors = routine.stops.indices.contains { index in
+            guard index < routine.dwellStart.count, index < routine.dwellEnd.count else { return false }
+            return (routine.stops[index] == .home || routine.stops[index] == .work)
+                && hour >= Double(routine.dwellStart[index]) && hour < Double(routine.dwellEnd[index])
+        }
+        node.alpha = indoors ? 0 : 1
         let facing = pose.facing ?? walkerFacing[citizen.id] ?? .sw
         if pose.moving { walkerFacing[citizen.id] = facing }
         let frame = pose.moving ? Int(localTime / 0.15) % 2 : 0
@@ -1093,9 +1129,80 @@ final class IslandScene: SKScene {
         return badge
     }
 
+    /// Cosmetic light is independent of simulation ticks and saved state. A
+    /// clamped frame delta prevents background time from fast-forwarding it.
+    private func updateLighting(at time: TimeInterval) {
+        let reduceMotion = UIAccessibility.isReduceMotionEnabled
+        if reduceMotion != reducedLightingMotion {
+            reducedLightingMotion = reduceMotion
+            // Reconfigure visible water to stop/start existing ripple actions.
+            for node in tileNodes.values { node.name = nil }
+            refreshVisible(force: true)
+            previousLightingUpdate = -.infinity
+        }
+        if let previous = previousLightingFrame, !reduceMotion {
+            lightingElapsed += min(0.1, max(0, time - previous))
+        }
+        previousLightingFrame = time
+        // Only the cached veil/shadow/light nodes change, at most ten times/sec.
+        guard time - previousLightingUpdate >= 0.1 else { return }
+        previousLightingUpdate = time
+        let light = IslandLightProfile.sample(elapsed: lightingElapsed, reduceMotion: reduceMotion)
+        nightLayer.alpha = CGFloat(light.nightAlpha)
+        sunlightLayer.alpha = CGFloat(light.sunAlpha)
+        vignetteLayer.alpha = CGFloat(light.vignetteAlpha)
+        shadowLayer.alpha = CGFloat(light.shadowAlpha)
+        entryLightLayer.alpha = CGFloat(light.entryAlpha)
+    }
+
+    private func presentEntryLight(_ building: Building, map: WorldMap) {
+        let occupied = !building.residents.isEmpty || !building.workers.isEmpty
+        guard building.isStanding(on: map), occupied else {
+            entryLights.removeValue(forKey: building.id)?.removeFromParent()
+            return
+        }
+        let light: SKSpriteNode
+        if let cached = entryLights[building.id] { light = cached }
+        else {
+            light = SKSpriteNode(texture: Self.entryGlowTexture, size: CGSize(width: 46, height: 23))
+            light.blendMode = .add
+            entryLights[building.id] = light
+            entryLightLayer.addChild(light)
+        }
+        light.position = point(for: building.entrance, in: map)
+    }
+
+    private static let entryGlowTexture = radialTexture(vignette: false)
+
+    /// One small cached gradient, not one texture or light shader per building.
+    private static func radialTexture(vignette: Bool) -> SKTexture {
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        format.opaque = false
+        let image = UIGraphicsImageRenderer(size: CGSize(width: 128, height: 128), format: format).image { output in
+            let context = output.cgContext
+            let colors: [CGColor] = vignette
+                ? [UIColor.clear.cgColor, UIColor.clear.cgColor, UIColor.black.cgColor]
+                : [UIColor(red: 1, green: 0.64, blue: 0.22, alpha: 0.8).cgColor,
+                   UIColor(red: 1, green: 0.48, blue: 0.12, alpha: 0.25).cgColor, UIColor.clear.cgColor]
+            guard let gradient = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(),
+                                            colors: colors as CFArray, locations: [0, 0.4, 1]) else { return }
+            context.drawRadialGradient(gradient, startCenter: CGPoint(x: 64, y: 64), startRadius: 0,
+                                       endCenter: CGPoint(x: 64, y: 64), endRadius: 90,
+                                       options: [.drawsBeforeStartLocation, .drawsAfterEndLocation])
+        }
+        let texture = SKTexture(image: image)
+        texture.filteringMode = .linear
+        return texture
+    }
+
     private func resizeNightLayer() {
         nightLayer.size = CGSize(width: size.width * 5, height: size.height * 5)
         nightLayer.position = .zero
+        sunlightLayer.size = nightLayer.size
+        sunlightLayer.position = .zero
+        vignetteLayer.size = size
+        vignetteLayer.position = .zero
     }
 
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
@@ -1515,5 +1622,29 @@ extension MapOverlayMode {
         case .foodAccess: return "Homes & roads: green stocked market · amber empty market · red no access · gray no coverage data."
         case .employment: return "District residents employed: red 0% → amber 50% → green 100%. Gray: no residents."
         }
+    }
+}
+
+// MARK: - Pure world lighting
+/// Presentation-only policy, extracted by tools/check-world-lighting.py.
+struct IslandLightProfile {
+    let nightAlpha: Double
+    let sunAlpha: Double
+    let vignetteAlpha: Double
+    let shadowAlpha: Double
+    let entryAlpha: Double
+
+    static func sample(elapsed: Double, reduceMotion: Bool) -> IslandLightProfile {
+        let seconds = elapsed.isFinite ? max(0, elapsed) : 0
+        let phase = reduceMotion ? 0.18 : (seconds / 240 + 0.18).truncatingRemainder(dividingBy: 1)
+        let sun = cos(phase * .pi * 2)
+        let t = min(1, max(0, (0.15 - sun) / 0.9))
+        let night = t * t * (3 - 2 * t)
+        let twilight = max(0, 1 - abs(sun) / 0.65) * (1 - night * 0.8)
+        return IslandLightProfile(nightAlpha: 0.02 + 0.20 * night,
+                                  sunAlpha: 0.012 + 0.04 * twilight,
+                                  vignetteAlpha: 0.08 + 0.04 * night,
+                                  shadowAlpha: 0.90 - 0.72 * night,
+                                  entryAlpha: 0.75 * night)
     }
 }

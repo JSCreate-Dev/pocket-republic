@@ -43,6 +43,9 @@ struct MainView: View {
             CitizenDirectory()
                 .navigationTitle("People")
                 .navigationBarTitleDisplayMode(.inline)
+                .toolbarColorScheme(.light, for: .navigationBar)
+                .toolbarBackground(RepublicTheme.cream, for: .navigationBar)
+                .toolbarBackground(.visible, for: .navigationBar)
         }
     }
 
@@ -59,6 +62,9 @@ struct MainView: View {
             .background(RepublicTheme.cream)
             .navigationTitle("Govern")
             .navigationBarTitleDisplayMode(.inline)
+                .toolbarColorScheme(.light, for: .navigationBar)
+                .toolbarBackground(RepublicTheme.cream, for: .navigationBar)
+                .toolbarBackground(.visible, for: .navigationBar)
         }
     }
 
@@ -87,6 +93,9 @@ struct MainView: View {
             GazetteView()
                 .navigationTitle("Gazette")
                 .navigationBarTitleDisplayMode(.inline)
+                .toolbarColorScheme(.light, for: .navigationBar)
+                .toolbarBackground(RepublicTheme.cream, for: .navigationBar)
+                .toolbarBackground(.visible, for: .navigationBar)
         }
     }
 
@@ -117,6 +126,9 @@ private struct NewCitySheet: View {
             }
             .navigationTitle("New city")
             .navigationBarTitleDisplayMode(.inline)
+                .toolbarColorScheme(.light, for: .navigationBar)
+                .toolbarBackground(RepublicTheme.cream, for: .navigationBar)
+                .toolbarBackground(.visible, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }

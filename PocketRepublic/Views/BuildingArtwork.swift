@@ -51,11 +51,11 @@ enum BuildingSpriteCatalog {
         case .market:
             return BuildingSpriteSpec(artTilesWide: 3, artTilesDeep: 2,
                                       pointSize: CGSize(width: 160, height: 123),
-                                      imageName: "building_market")
+                                      imageName: UIImage(named: "building_market_golden") == nil ? "building_market" : "building_market_golden")
         case .workshop:
             return BuildingSpriteSpec(artTilesWide: 3, artTilesDeep: 2,
                                       pointSize: CGSize(width: 160, height: 163),
-                                      imageName: "building_workshop")
+                                      imageName: UIImage(named: "building_workshop_golden") == nil ? "building_workshop" : "building_workshop_golden")
         case .farm:
             return BuildingSpriteSpec(artTilesWide: 3, artTilesDeep: 3,
                                       pointSize: CGSize(width: 192, height: 154),

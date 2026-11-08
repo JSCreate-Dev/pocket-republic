@@ -146,7 +146,7 @@ public enum BuildingInspector {
                 rows.append(InspectRow(
                     id: "resident-\(citizen.id.raw)",
                     title: citizen.name,
-                    value: "\(job) · \(hungerText(citizen.daysHungry))",
+                    value: "\(job) · \(hungerText(citizen.daysHungry)) · \(citizen.happiness)% happy",
                     tone: .person
                 ))
             }
@@ -154,10 +154,16 @@ public enum BuildingInspector {
         }
         let capacity = building.kind.workerCapacity
         guard capacity > 0 else { return nil }
-        return InspectSection(id: "people", rows: [
-            InspectRow(id: "workers", title: "Workers",
-                       value: "\(building.workers.count) / \(capacity)", tone: .plain)
-        ])
+        let staff = state.citizens.filter { $0.alive && $0.work == building.id }
+        var rows = [InspectRow(id: "workers", title: "Workers",
+                              value: "\(building.workers.count) / \(capacity)", tone: .plain)]
+        for citizen in staff {
+            let home = citizen.home.map { "House #\($0.raw + 1)" } ?? "No home"
+            rows.append(InspectRow(id: "worker-\(citizen.id.raw)", title: citizen.name,
+                                   value: "\(home) · \(hungerText(citizen.daysHungry)) · \(citizen.happiness)% happy",
+                                   tone: .person))
+        }
+        return InspectSection(id: "people", rows: rows)
     }
 
     private static func numbersSection(_ building: Building, _ state: RepublicState) -> InspectSection {

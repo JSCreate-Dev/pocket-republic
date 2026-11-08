@@ -34,6 +34,7 @@ struct IslandView: View {
     @State private var roadReceipt: RoadReceipt?
     @State private var mapOverlay: MapOverlayMode = .standard
     @State private var showLayerHelp = false
+    @State private var showGrowth = false
 
     var body: some View {
         GeometryReader { geometry in
@@ -70,6 +71,21 @@ struct IslandView: View {
                     }
                     .padding(8)
                     .frame(maxWidth: .infinity, alignment: .topLeading)
+                }
+
+                if layout.mapFirst, let tile = selectedTile, !cardOpen, tool == .inspect {
+                    HStack(spacing: 8) {
+                        Text("Tile \(game.state.map.x(of: tile)), \(game.state.map.y(of: tile)) · \(terrainLabel(at: tile))\(overlayTileDescription(tile))")
+                            .font(.caption).fixedSize(horizontal: false, vertical: true)
+                        Button { selectedTile = nil } label: {
+                            Image(systemName: "xmark").frame(width: 44, height: 44)
+                        }
+                        .accessibilityLabel("Close tile inspection")
+                    }
+                    .padding(.leading, 12)
+                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14))
+                    .frame(width: max(0, min(420, layout.focus.width - 16)))
+                    .position(x: layout.focus.midX, y: max(28, layout.focus.maxY - 32))
                 }
 
                 if layout.mode == .tent && !tentControlsOpen {
@@ -114,6 +130,9 @@ struct IslandView: View {
                 DevelopmentRoadmap()
                 SeasonCard()
             }
+        }
+        .sheet(isPresented: $showGrowth) {
+            CityReadingSheet("Settlement growth") { growthDetails }
         }
         .sheet(isPresented: $showCharter) {
             CityReadingSheet("Founding charter") { SeasonCard() }
@@ -255,7 +274,7 @@ struct IslandView: View {
                         }
                     )
                     .frame(maxWidth: layout.cardWidth, alignment: .leading)
-                } else if let selectedTile {
+                } else if let selectedTile, !layout.mapFirst {
                     let x = game.state.map.x(of: selectedTile)
                     let y = game.state.map.y(of: selectedTile)
                     Text("Tile \(x), \(y) · \(terrainLabel(at: selectedTile))\(overlayTileDescription(selectedTile))")
@@ -490,13 +509,24 @@ struct IslandView: View {
             } else if let hint = tool.isBuilding ? placementHint : game.feedback {
                 Text(hint).font(.caption).foregroundStyle(RepublicTheme.brass).lineLimit(2)
             } else if hungryResidents > 0 {
-                Label("\(hungryResidents) hungry · check market access and food", systemImage: "exclamationmark.triangle.fill")
-                    .font(.caption2.weight(.semibold)).foregroundStyle(RepublicTheme.sand)
+                Button { showGrowth = true } label: {
+                    Label("\(hungryResidents) hungry · check market access and food", systemImage: "exclamationmark.triangle.fill")
+                        .font(.caption2.weight(.semibold)).foregroundStyle(RepublicTheme.sand)
+                        .frame(minHeight: 44, alignment: .leading)
+                }
+                .buttonStyle(.plain)
             }
             if unlockedBanner == nil && mapOverlay == .standard && game.saveIssue == nil && game.feedback == nil && !tool.isBuilding && hungryResidents == 0 {
-                Text(developmentHint)
-                    .font(.caption2).foregroundStyle(RepublicTheme.paper.opacity(0.72))
-                    .lineLimit(2)
+                Button { showGrowth = true } label: {
+                    HStack(spacing: 6) {
+                        Text(developmentHint).lineLimit(2)
+                        Image(systemName: "info.circle")
+                    }
+                    .font(.caption2).foregroundStyle(RepublicTheme.paper.opacity(0.85))
+                    .frame(minHeight: 44, alignment: .leading)
+                }
+                .buttonStyle(.plain)
+                .accessibilityHint("Shows all current newcomer requirements")
             }
             if let seasonBanner {
                 Text(seasonBanner).font(.caption.weight(.bold)).foregroundStyle(RepublicTheme.brass)
@@ -610,16 +640,47 @@ struct IslandView: View {
     }
 
     private var developmentHint: String {
-        let jobless = game.state.citizens.filter { $0.alive && $0.work == nil }.count
-        if jobless > 0 {
-            let openings = game.state.buildings.filter { $0.isStanding(on: game.state.map) }
-                .reduce(0) { $0 + max(0, Int($1.kind.workerCapacity) - $1.workers.count) }
-            return openings > 0 ? "\(openings) open jobs · residents find work automatically"
-                : "\(jobless) seeking work · expand the local economy"
-        }
+        let living = game.state.citizens.filter(\.alive)
         let beds = game.state.buildings.filter { $0.kind == .house && $0.isStanding(on: game.state.map) }
             .reduce(0) { $0 + max(0, Int($1.kind.housingCapacity) - $1.residents.count) }
-        return beds == 0 ? "Housing full · build homes for newcomers" : "\(beds) beds available · keep jobs and food ready"
+        guard let rules = game.state.config.settlementGrowth else {
+            return "Residents find jobs automatically · view city capacity"
+        }
+        let happiness = living.isEmpty ? 0 : living.reduce(Int64(0)) { $0 + Int64($1.happiness) } / Int64(living.count)
+        var hints: [String] = []
+        if beds == 0 { hints.append("Housing full") }
+        if happiness < Int64(rules.minimumHappiness) { hints.append("Happiness needs \(rules.minimumHappiness)%") }
+        return hints.isEmpty ? "\(beds) spare beds · check newcomer readiness" : hints.joined(separator: " · ")
+    }
+
+    private var growthDetails: some View {
+        let outlook = SettlementOutlook(state: game.state)
+        return VStack(alignment: .leading, spacing: 16) {
+            Text(outlook.enabled ? "What newcomers need" : "City capacity")
+                .font(RepublicTheme.heading(.title2))
+            Text("\(outlook.freeBeds) spare beds · \(outlook.openJobs) open jobs")
+            Text("Happiness \(outlook.happiness)% · \(outlook.hungryResidents) hungry residents")
+            if outlook.enabled {
+                if outlook.ready {
+                    Label("Ready for the next arrival check", systemImage: "checkmark.circle.fill")
+                        .foregroundStyle(RepublicTheme.fertile)
+                }
+                ForEach(outlook.blockers, id: \.self) { blocker in
+                    Label(blocker, systemImage: "exclamationmark.circle")
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                if let day = outlook.nextArrivalDay {
+                    Text("Next scheduled check: Day \(day). Conditions must still hold then. This checks capacity for the first newcomer; a second arrival needs another bed, job and additional food.")
+                        .font(.subheadline).foregroundStyle(RepublicTheme.inkSoft)
+                }
+            } else {
+                Text("This established city's saved rules do not enable newcomer waves.")
+            }
+            Text("Residents take available jobs automatically. A spare home must connect to a workplace and a sufficiently stocked market. Happiness shows the current average; it does not identify an individual cause.")
+                .font(.subheadline).foregroundStyle(RepublicTheme.inkSoft)
+        }
+        .foregroundStyle(RepublicTheme.ink)
+        .padding().dioramaCard()
     }
 
     private var dayPopulation: some View {
@@ -1002,7 +1063,7 @@ struct IslandView: View {
     }
 
     private var detailOpen: Bool {
-        cardOpen || selectedTile != nil || attentionChip != nil || tool != .inspect
+        cardOpen || attentionChip != nil || tool != .inspect
     }
 
     private var hungryResidents: Int32 {

@@ -104,6 +104,43 @@ final class WalkerRoutineTests: XCTestCase {
         XCTAssertTrue(access.isPassable(entrance))
     }
 
+    func testRouteVariationPreservesShortestLengthAndPassability() {
+        var map = WorldMap(width: 8, height: 8)
+        for i in map.road.indices { map.road[i] = true }
+        let access = MapBuildingAccess(map: map, buildings: [])
+        let start = map.index(x: 1, y: 1)
+        let end = map.index(x: 6, y: 6)
+        let baseline = Pathfinder.path(from: start, to: end, map: map, access: access)
+        var distinct = Set<String>()
+        for variation in UInt64(1)...16 {
+            let route = Pathfinder.path(from: start, to: end, map: map, access: access, variation: variation)
+            XCTAssertEqual(route.count, baseline.count)
+            XCTAssertEqual(route.last, end)
+            XCTAssertTrue(route.allSatisfy { access.isPassable($0) })
+            for pair in zip(route, route.dropFirst()) {
+                XCTAssertTrue(map.neighbours(of: pair.0).contains(pair.1))
+            }
+            distinct.insert(route.map { String($0.raw) }.joined(separator: ","))
+        }
+        XCTAssertGreaterThan(distinct.count, 1)
+    }
+
+    func testDisconnectedWorkerStaysHomeWithoutTeleporting() throws {
+        var (state, citizen) = try employedShopper()
+        for i in state.map.road.indices { state.map.road[i] = false }
+        let routine = WalkerRoutine.plan(for: citizen, in: state, access: state.buildingAccess())
+        XCTAssertEqual(routine.stops, [.home])
+        XCTAssertTrue(routine.legPaths.isEmpty)
+    }
+
+    func testRoutineReaderDoesNotChangeSavedState() throws {
+        let (state, citizen) = try employedShopper()
+        let before = state.stateHash()
+        let first = WalkerRoutine.plan(for: citizen, in: state, access: state.buildingAccess())
+        XCTAssertEqual(first, WalkerRoutine.plan(for: citizen, in: state, access: state.buildingAccess()))
+        XCTAssertEqual(before, state.stateHash())
+    }
+
     private func employedShopper() throws -> (RepublicState, Citizen) {
         var state = WorldGenerator.generate(seed: 3, citizenCount: 80)
         SimulationEngine.rebuildSpatialCaches(&state)

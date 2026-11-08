@@ -35,6 +35,8 @@ struct CitizenDirectory: View {
 
 private struct CitizenCard: View {
     let citizen: Citizen
+    @EnvironmentObject private var game: Game
+    @State private var showDay = false
     @ScaledMetric(relativeTo: .headline) private var portraitSide: CGFloat = 56
 
     var body: some View {
@@ -44,17 +46,63 @@ private struct CitizenCard: View {
                 Text(citizen.name)
                     .font(RepublicTheme.heading(.headline))
                     .fixedSize(horizontal: false, vertical: true)
-                Text(citizen.occupation.spoken)
+                Text("Age \(citizen.age) · \(citizen.occupation.spoken)")
                     .font(RepublicTheme.body(.subheadline))
                     .foregroundStyle(RepublicTheme.inkSoft)
                 ViewThatFits(in: .horizontal) {
                     HStack(spacing: RepublicTheme.Space.sm) { chips }
                     VStack(alignment: .leading, spacing: RepublicTheme.Space.xs) { chips }
                 }
+                Text("Home: \(buildingName(citizen.home))")
+                    .font(RepublicTheme.body(.caption))
+                    .foregroundStyle(RepublicTheme.inkSoft)
+                Text("Work: \(buildingName(citizen.work))")
+                    .font(RepublicTheme.body(.caption))
+                    .foregroundStyle(RepublicTheme.inkSoft)
+                DisclosureGroup("Today's routine", isExpanded: $showDay) {
+                    if showDay { dayDetails }
+                }
+                .font(RepublicTheme.body(.subheadline))
+                .tint(RepublicTheme.ink)
             }
         }
         .dioramaCard(fill: RepublicTheme.sand.opacity(0.28))
         .accessibilityElement(children: .combine)
+    }
+
+    private func buildingName(_ id: BuildingID?) -> String {
+        guard let id, id.raw >= 0, Int(id.raw) < game.state.buildings.count else { return "None" }
+        let building = game.state.buildings[Int(id.raw)]
+        let name: String
+        switch building.kind {
+        case .house: name = "House"
+        case .farm: name = "Farm"
+        case .market: name = "Market"
+        case .workshop: name = "Workshop"
+        case .townHall: name = "Town Hall"
+        case .clinic: name = "Clinic"
+        case .school: name = "School"
+        case .police: name = "Police"
+        case .dock: name = "Dock"
+        }
+        return "\(name) #\(id.raw + 1)"
+    }
+
+    private var dayDetails: some View {
+        let state = game.state
+        let routine = WalkerRoutine.plan(for: citizen, in: state, access: state.buildingAccess())
+        return VStack(alignment: .leading, spacing: RepublicTheme.Space.xs) {
+            Text("Planned island hours · roads determine reachable stops")
+                .font(RepublicTheme.body(.caption))
+                .foregroundStyle(RepublicTheme.inkSoft)
+            ForEach(routine.stops.indices, id: \.self) { index in
+                Text("\(routine.dwellStart[index]):00–\(routine.dwellEnd[index]):00 · \(routine.stops[index].rawValue.capitalized)")
+                    .font(RepublicTheme.body(.caption))
+            }
+            if routine.stops.isEmpty { Text("No home to start a daily route.") }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.top, RepublicTheme.Space.xs)
     }
 
     private var portrait: some View {

@@ -1,0 +1,13 @@
+# Workshop and market art provenance
+
+Generated with the built-in image generator on 2026-11-08. Original sprites supplied as geometry references; approved golden house supplied as material/style reference. These are new sibling assets, not overwritten originals.
+
+## Workshop
+
+Use case: style-transfer. Project-bound transparent isometric game building sprite for Pocket Republic. Image 1 is the original geometry reference; image 2 is the approved new material/style reference. A working Caribbean artisan workshop, two storeys, weathered timber framing and ivory plaster, terracotta pitched roof, small masonry chimney, open ground-floor workshop door with visible workbench, timber supplies neatly inside the footprint. Keep the original workshop silhouette and rectangular 3x2 ground footprint. Asset canvas aspect 160:163. Match image 1 camera, visible ground rhombus orientation and bottom front anchor exactly. Upgrade to the handcrafted detailed style of image 2: richly textured materials, crisp readable silhouette at phone scale, warm upper-left sun, soft contact occlusion. Orthographic 2:1 isometric ground edges. Entire object in frame, centered, isolated on true transparent alpha. No surrounding terrain, no text, no people, no smoke plume, no cast shadow outside base. Not a concept scene, one usable game sprite.
+
+## Market
+
+Use case: style-transfer. Project-bound transparent isometric game building sprite for Pocket Republic. Image 1 is the original geometry reference; image 2 is the approved new material/style reference. A Caribbean outdoor produce market, four timber stalls with weathered ivory/teal and muted terracotta striped cloth canopies, attractive baskets of bananas, vegetables, clay jars and wooden crates. Keep all stalls and goods within original rectangular 3x2 paved footprint. No enclosing building and no people. Asset canvas aspect 160:123. Match image 1 camera, visible ground rhombus orientation and bottom front anchor exactly. Upgrade to the handcrafted detailed style of image 2: richly textured materials, crisp readable silhouette at phone scale, warm upper-left sun, soft contact occlusion. Orthographic 2:1 isometric ground edges. Entire object in frame, centered, isolated on true transparent alpha. No surrounding terrain, no text, no people, no smoke plume, no cast shadow outside base. Not a concept scene, one usable game sprite.
+
+Exports use ImageMagick trim, Lanczos fit and transparent bottom-centered padding to existing logical dimensions. Originals remain in the project. Check actual road alignment on device: generated geometry is illustrative, while core footprint/collision remains authoritative.
