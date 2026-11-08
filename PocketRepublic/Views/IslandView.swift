@@ -20,6 +20,7 @@ struct IslandView: View {
     @State private var tentMode = false
     @State private var tentControlsOpen = false
     @State private var dismissedIslandEvent: DecisionID?
+    @State private var dismissedBlocking: DecisionID?
 
     var body: some View {
         GeometryReader { geometry in
@@ -80,7 +81,7 @@ struct IslandView: View {
                 scene.render(game.state)
                 scene.setSelection(selectedBuildingID)
                 configureTapHandler()
-                openIslandEventIfNeeded()
+                presentAttention()
             }
             .sensoryFeedback(.selection, trigger: selectedBuildingID) { _, newValue in
                 newValue != nil
@@ -105,8 +106,8 @@ struct IslandView: View {
         .onChange(of: tool) { _, newTool in
             if newTool != .inspect { selectedBuildingID = nil }
         }
-        .onChange(of: liveIslandEventID) { _, _ in
-            openIslandEventIfNeeded()
+        .onChange(of: attentionCue) { _, _ in
+            presentAttention()
         }
     }
 
@@ -114,6 +115,8 @@ struct IslandView: View {
         let scrolling = VStack(spacing: 8) {
             if game.state.pending == nil && selectedAgenda == nil {
                 agendaPreviews(layout: layout)
+            } else if game.state.pending == nil, let blocking = blockingItem, selectedAgenda?.id != blocking.id {
+                previewButton(blocking)
             }
             if !layout.scrollControls { Spacer(minLength: 0) }
             if let pending = game.state.pending {
@@ -275,11 +278,10 @@ struct IslandView: View {
         }
     }
 
+    /// A choice that blocks the day outranks an island event. On a one-card
+    /// phone sheet the first rank is the only button, so the election stays reachable.
     private func previewRank(_ item: AgendaItem) -> Int {
-        if item.islandEventID != nil { return 0 }
-        if item.tier == .crisis { return 1 }
-        if item.kind == .decree { return 3 }
-        return 2
+        AgendaSheetOrder.rank(tier: item.tier, isIslandEvent: item.islandEventID != nil, isDecree: item.kind == .decree)
     }
 
     @ViewBuilder private func agendaPreviews(layout: CityDisplayLayout) -> some View {
@@ -306,7 +308,7 @@ struct IslandView: View {
         } label: {
             HStack(spacing: 5) {
                 Image(systemName: item.islandEventID == nil ? "text.bubble.fill" : "newspaper.fill")
-                Text(item.islandEvent?.title ?? item.kind.cityTitle).lineLimit(1)
+                Text(previewTitle(item)).lineLimit(1)
                 Image(systemName: "chevron.right").font(.caption2)
             }
             .font(.caption.weight(.semibold))
@@ -314,9 +316,16 @@ struct IslandView: View {
         }
         .buttonStyle(.borderedProminent)
         .tint(previewTint(item))
+        .accessibilityHint(item.tier == .crisis ? "This choice blocks the next day" : "Opens this choice")
+    }
+
+    private func previewTitle(_ item: AgendaItem) -> String {
+        if item.tier == .crisis { return "\(item.kind.cityTitle) · day is waiting" }
+        return item.islandEvent?.title ?? item.kind.cityTitle
     }
 
     private func previewTint(_ item: AgendaItem) -> Color {
+        if item.tier == .crisis { return Color(red: 0.78, green: 0.22, blue: 0.12) }
         switch item.islandEvent?.tone {
         case .good: return Color(red: 0.24, green: 0.55, blue: 0.28)
         case .bad: return Color(red: 0.72, green: 0.28, blue: 0.16)
@@ -368,6 +377,7 @@ struct IslandView: View {
                 selectedAgendaID = nil
             },
             onClose: {
+                if item.tier == .crisis { dismissedBlocking = item.id }
                 if item.islandEventID != nil { dismissedIslandEvent = item.id }
                 selectedAgendaID = nil
             }
@@ -375,11 +385,45 @@ struct IslandView: View {
         .frame(maxWidth: layout.cardWidth, alignment: .leading)
     }
 
+    private var blockingItem: AgendaItem? {
+        game.state.agenda.first { $0.tier == .crisis }
+    }
+
+    private var blockingAgendaID: DecisionID? { blockingItem?.id }
+
     private var liveIslandEventID: DecisionID? {
         game.state.agenda.first { $0.islandEventID != nil }?.id
     }
 
+    /// Pending id, blocking agenda id, and island-event id. A new election changes
+    /// this even when the island card does not.
+    private var attentionCue: String {
+        let pending = game.state.pending?.id.raw ?? -1
+        let blocking = blockingAgendaID?.raw ?? -1
+        let island = liveIslandEventID?.raw ?? -1
+        return "\(pending)|\(blocking)|\(island)"
+    }
+
+    /// A pending crisis or an election owns the sheet. An island event may open
+    /// itself only when nothing is blocking the day.
+    private func presentAttention() {
+        if game.state.pending != nil {
+            selectedAgendaID = nil
+            sheetExpanded = true
+            return
+        }
+        if let blocking = blockingAgendaID {
+            if dismissedBlocking != blocking && selectedAgendaID != blocking {
+                selectedAgendaID = blocking
+                sheetExpanded = true
+            }
+            return
+        }
+        openIslandEventIfNeeded()
+    }
+
     private func openIslandEventIfNeeded() {
+        guard blockingAgendaID == nil, game.state.pending == nil else { return }
         guard let id = liveIslandEventID, id != dismissedIslandEvent else { return }
         selectedAgendaID = id
         sheetExpanded = true

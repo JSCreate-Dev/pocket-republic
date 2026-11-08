@@ -62,7 +62,7 @@ struct DayClockPolicy: Equatable {
             return "Paused while a confirmation is open."
         }
         if blockedByCrisis {
-            return "Paused for a crisis. The day waits for that choice. Next Day is held too."
+            return "Paused for a crisis or an election. The next day waits for that choice. Next Day is held too, and Play cannot skip it."
         }
         if islandEventWaiting {
             return "Paused while an island event is waiting, so it cannot lapse in the background. Choose an option, or press Next Day yourself."

@@ -74,7 +74,10 @@ struct DecreeBoard: View {
 
     @ViewBuilder private var council: some View {
         let items = game.state.agenda.filter { $0.kind != .decree }.sorted { lhs, rhs in
-            (lhs.islandEventID != nil ? 0 : 1) < (rhs.islandEventID != nil ? 0 : 1)
+            func rank(_ item: AgendaItem) -> Int {
+                AgendaSheetOrder.rank(tier: item.tier, isIslandEvent: item.islandEventID != nil, isDecree: item.kind == .decree)
+            }
+            return rank(lhs) < rank(rhs)
         }
         if !items.isEmpty {
             Text("Before the council")

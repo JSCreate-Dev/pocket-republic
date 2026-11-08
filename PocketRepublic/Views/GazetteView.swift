@@ -99,15 +99,12 @@ enum GazetteTone {
 
 enum GazetteReading {
     static func days(in state: RepublicState) -> [GazetteDay] {
-        let answered = Set(state.events.compactMap { event -> String? in
-            guard event.kind == .islandEvent, let split = islandSplit(event) else { return nil }
-            return split.headline
-        })
+        let suppressedRaises = IslandEventPaper.suppressedRaiseIDs(in: state.events)
         var byDay: [Int32: [GazetteStory]] = [:]
         var grouped: [GroupKey: [GameEvent]] = [:]
         for event in state.events {
             if event.kind == .islandEvent {
-                if let story = islandStory(event, suppressing: answered) {
+                if let story = islandStory(event, suppressing: suppressedRaises) {
                     byDay[event.day, default: []].append(story)
                 }
                 continue
@@ -137,15 +134,15 @@ enum GazetteReading {
     }
 
     private static func islandSplit(_ event: GameEvent) -> (headline: String, result: String)? {
-        guard let detail = event.causes.first?.detail, !detail.isEmpty else { return nil }
-        guard let range = detail.range(of: ". ") else { return nil }
-        let headline = String(detail[..<range.lowerBound])
+        guard let detail = event.causes.first?.detail,
+              let headline = IslandEventPaper.outcomeHeadline(in: detail),
+              let range = detail.range(of: ". ") else { return nil }
         let result = String(detail[range.upperBound...])
-        guard !headline.isEmpty, !result.isEmpty else { return nil }
+        guard !result.isEmpty else { return nil }
         return (headline, result)
     }
 
-    private static func islandStory(_ event: GameEvent, suppressing answered: Set<String>) -> GazetteStory? {
+    private static func islandStory(_ event: GameEvent, suppressing suppressed: Set<Int64>) -> GazetteStory? {
         guard let detail = event.causes.first?.detail, !detail.isEmpty else { return nil }
         if let split = islandSplit(event) {
             return GazetteStory(
@@ -156,7 +153,7 @@ enum GazetteReading {
                 tone: tone(headline: split.headline, result: split.result)
             )
         }
-        if answered.contains(detail) { return nil }
+        if suppressed.contains(event.id.raw) { return nil }
         return GazetteStory(
             id: "island-\(event.id.raw)",
             headline: detail,
