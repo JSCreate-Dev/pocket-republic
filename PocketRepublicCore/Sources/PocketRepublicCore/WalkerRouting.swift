@@ -21,7 +21,7 @@ public struct MapBuildingAccess: BuildingAccess, Sendable {
     public init(map: WorldMap, buildings: [Building]) {
         self.map = map
         var tiles = [Int32](repeating: -1, count: buildings.count)
-        for b in buildings {
+        for b in buildings where b.occupiesGround(on: map) {
             let i = Int(b.id.raw)
             if i >= 0, i < tiles.count { tiles[i] = b.tile.raw }
         }

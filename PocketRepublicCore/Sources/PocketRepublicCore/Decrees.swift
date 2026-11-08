@@ -68,24 +68,31 @@ extension RepublicState {
     /// Keeping this generic is what stops the decision stream from turning into a
     /// thousand-arm switch as content grows.
     mutating func apply(_ e: AgendaEffect, at location: EventLocation) {
+        var gain = e.treasuryGain
+        if let requested = e.foodExport, requested > 0 {
+            let shipped = exportFood(upTo: requested, preferring: location)
+            if shipped < requested {
+                gain = gain * Int64(shipped) / Int64(max(1, requested))
+            }
+        }
         if e.treasuryCost > 0 { transfer(from: .treasury, to: .external, e.treasuryCost) }
-        if e.treasuryGain > 0 { transfer(from: .external, to: .treasury, e.treasuryGain) }
+        if gain > 0 { transfer(from: .external, to: .treasury, gain) }
 
         if e.foodImport > 0 {
             // Food entering the world must be recorded, or conservation breaks.
-            // A market that is still a building site cannot hold food, so walk past
-            // it to one that is open rather than dropping the delivery.
+            // A market that is still a site, or one that has been demolished, cannot
+            // hold food, so walk past it to one that is open.
             var target: BuildingID?
             let candidates = [
                 location.building,
                 buildings.first(where: {
-                    $0.kind == .market && $0.district == location.district && $0.isOperational })?.id,
-                buildings.first(where: { $0.kind == .market && $0.isOperational })?.id,
+                    $0.kind == .market && $0.district == location.district && $0.isStanding(on: map) })?.id,
+                buildings.first(where: { $0.kind == .market && $0.isStanding(on: map) })?.id,
             ]
             for candidate in candidates {
                 guard let c = candidate else { continue }
                 let b = buildings[Int(c.raw)]
-                if b.kind.storesFood && b.isOperational { target = c; break }
+                if b.kind.storesFood && b.isStanding(on: map) { target = c; break }
             }
             if let t = target {
                 buildings[Int(t.raw)].foodStore += e.foodImport

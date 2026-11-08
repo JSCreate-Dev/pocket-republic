@@ -37,6 +37,10 @@ public struct AgendaEffect: Codable, Sendable, Equatable {
     public var districtUnrest: Int32 = 0
     public var districtNeglectReset: Bool = false
     public var foodImport: Int32 = 0
+    /// Food leaving the island, taken from standing markets. Nil is "not this
+    /// effect" and is omitted from the save. A shortfall scales `treasuryGain`
+    /// by the crates actually shipped, so a thin market cannot mint the full price.
+    public var foodExport: Int32? = nil
     /// Parallel arrays, not a dictionary keyed by the enum: Codable encodes such a
     /// dictionary as a flat array in iteration order, which already cost us a
     /// non-canonical save file once.
@@ -82,11 +86,17 @@ public struct AgendaItem: Codable, Sendable, Identifiable, Equatable {
     public let ignoreCost: Int32
     /// Ranking weight, derived from simulation state. Higher = more pressing.
     public let salience: Int32
+    /// Set when this row is an island event. The kind stays `.advisoryTradeoff`
+    /// so the app's existing exhaustive `AgendaKind` switches keep compiling.
+    /// Presentation looks up `EventDeck.spec(_:)`. Nil on every other row, and
+    /// omitted from saves that predate the deck.
+    public let islandEventID: Int32?
 
     public init(id: DecisionID, kind: AgendaKind, tier: AgendaTier, raisedOnDay: Int32,
                 expiresOnDay: Int32?, faction: FactionKind?, location: EventLocation,
                 causes: [CauseFactor], options: [AgendaOption],
-                ignoreCost: Int32 = 0, salience: Int32 = 0) {
+                ignoreCost: Int32 = 0, salience: Int32 = 0,
+                islandEventID: Int32? = nil) {
         self.id = id
         self.kind = kind
         self.tier = tier
@@ -98,6 +108,12 @@ public struct AgendaItem: Codable, Sendable, Identifiable, Equatable {
         self.options = options
         self.ignoreCost = ignoreCost
         self.salience = salience
+        self.islandEventID = islandEventID
+    }
+
+    /// The catalogue entry for an island-event row, if the deck still has it.
+    public var islandEvent: IslandEventSpec? {
+        islandEventID.flatMap { EventDeck.spec($0) }
     }
 
     public func isLive(on day: Int32) -> Bool {

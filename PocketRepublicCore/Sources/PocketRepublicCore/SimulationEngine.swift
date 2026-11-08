@@ -70,7 +70,9 @@ public enum SimulationEngine {
         // connected to nothing -- that silently starved whole districts.
         for i in s.districts.indices {
             let did = s.districts[i].id
-            let house = s.buildings.first { $0.kind == .house && $0.district == did && !$0.residents.isEmpty }
+            let house = s.buildings.first {
+                $0.kind == .house && $0.district == did && !$0.residents.isEmpty && $0.occupiesGround(on: s.map)
+            }
             s.districts[i].servingMarket = house.flatMap { s.fields.nearestMarket(at: $0.tile) }
         }
     }
@@ -82,8 +84,9 @@ public enum SimulationEngine {
     // MARK: - Employment
 
     static func assignWork(_ s: inout RepublicState) {
+        releaseClosedWorkplaces(&s)
         var openings: [(BuildingID, TileIndex, Int32)] = []
-        for b in s.buildings where b.isOperational && b.kind.workerCapacity > Int32(b.workers.count) {
+        for b in s.buildings where b.isStanding(on: s.map) && b.kind.workerCapacity > Int32(b.workers.count) {
             openings.append((b.id, b.tile, b.kind.workerCapacity - Int32(b.workers.count)))
         }
         guard !openings.isEmpty else { return }
@@ -114,13 +117,37 @@ public enum SimulationEngine {
         }
     }
 
+    /// A demolished workplace stays in `buildings` so ids stay dense. Anyone still
+    /// pointing at it is unemployed, and the ghost is not a job opening.
+    static func releaseClosedWorkplaces(_ s: inout RepublicState) {
+        for i in s.citizens.indices {
+            guard let work = s.citizens[i].work else { continue }
+            let bi = Int(work.raw)
+            let closed = bi < 0 || bi >= s.buildings.count || !s.buildings[bi].isStanding(on: s.map)
+            guard closed else { continue }
+            let citizen = s.citizens[i].id
+            s.citizens[i].work = nil
+            s.citizens[i].occupation = .unemployed
+            guard bi >= 0, bi < s.buildings.count else { continue }
+            s.buildings[bi].workers.removeAll { $0 == citizen }
+            guard s.citizens[i].alive else { continue }
+            s.emit(.citizenUnemployed,
+                   location: EventLocation(district: s.buildings[bi].district, building: work),
+                   subjects: [citizen],
+                   causes: [CauseFactor(.unemployment, value: 0, detail: "workplace closed")])
+        }
+        for i in s.buildings.indices where !s.buildings[i].isStanding(on: s.map) {
+            s.buildings[i].workers.removeAll()
+        }
+    }
+
     // MARK: - Production
 
     static func produce(_ s: inout RepublicState) {
         for i in s.buildings.indices {
             let b = s.buildings[i]
             let workers = Int32(b.workers.count)
-            guard b.isOperational, workers > 0 else { continue }
+            guard b.isStanding(on: s.map), workers > 0 else { continue }
             let scale = Int64(b.mode.outputPercent)
             switch b.kind {
             case .farm:
@@ -201,7 +228,7 @@ public enum SimulationEngine {
     /// a full barn for no pay. One unit per farm per round keeps the wage money
     /// moving to every farm that actually delivered.
     static func distributeFood(_ s: inout RepublicState) {
-        let marketIndices = s.buildings.indices.filter { s.buildings[$0].kind == .market && s.buildings[$0].isOperational }
+        let marketIndices = s.buildings.indices.filter { s.buildings[$0].kind == .market && s.buildings[$0].isStanding(on: s.map) }
         guard !marketIndices.isEmpty else { return }
         let need = s.config.foodPerCitizenPerDay
         let unitCost = max(Int64(1), s.config.foodPrice / 2)
@@ -246,7 +273,7 @@ public enum SimulationEngine {
             var remaining: Int32
         }
         var lots: [Lot] = []
-        for i in s.buildings.indices where s.buildings[i].kind == .farm && s.buildings[i].isOperational {
+        for i in s.buildings.indices where s.buildings[i].kind == .farm && s.buildings[i].isStanding(on: s.map) {
             let remaining = min(s.buildings[i].foodStore, s.config.farmToMarketShipPerDay)
             guard remaining > 0 else { continue }
             lots.append(Lot(id: s.buildings[i].id, tile: s.buildings[i].tile, remaining: remaining))
@@ -347,7 +374,7 @@ public enum SimulationEngine {
     static func payWages(_ s: inout RepublicState) {
         for i in s.buildings.indices {
             let b = s.buildings[i]
-            guard b.isOperational, !b.workers.isEmpty else { continue }
+            guard b.isStanding(on: s.map), !b.workers.isEmpty else { continue }
             let payer: Account = b.kind.isCivic ? .treasury : .building(b.id)
             let wage = b.kind.isCivic ? s.policy.civicWage : s.config.privateWage
             for cid in b.workers {
@@ -392,7 +419,7 @@ public enum SimulationEngine {
             if due > 0 { s.transfer(from: .citizen(s.citizens[i].id), to: .treasury, due) }
         }
         let brate = Int64(max(0, s.policy.businessTaxPercent))
-        for i in s.buildings.indices where !s.buildings[i].kind.isCivic && s.buildings[i].isOperational {
+        for i in s.buildings.indices where !s.buildings[i].kind.isCivic && s.buildings[i].isStanding(on: s.map) {
             let due = s.buildings[i].funds * brate / 100
             if due > 0 { s.transfer(from: .building(s.buildings[i].id), to: .treasury, due) }
         }
@@ -400,7 +427,7 @@ public enum SimulationEngine {
 
     static func payUpkeep(_ s: inout RepublicState) {
         var total: Int64 = 0
-        for b in s.buildings where b.kind != .house && b.isOperational {
+        for b in s.buildings where b.kind != .house && b.isStanding(on: s.map) {
             total += b.kind.isCivic ? s.config.upkeepCivic : s.config.upkeepPrivate
         }
         let paid = s.transfer(from: .treasury, to: .external, total)
@@ -413,7 +440,7 @@ public enum SimulationEngine {
     }
 
     static func spoil(_ s: inout RepublicState) {
-        for i in s.buildings.indices where s.buildings[i].kind.storesFood && s.buildings[i].isOperational {
+        for i in s.buildings.indices where s.buildings[i].kind.storesFood && s.buildings[i].isStanding(on: s.map) {
             let lost = s.buildings[i].foodStore * s.config.marketSpoilagePercent / 100
             if lost > 0 { s.spoilFood(at: s.buildings[i].id, lost) }
         }

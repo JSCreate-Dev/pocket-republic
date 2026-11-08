@@ -21,9 +21,9 @@ extension RepublicState {
     public func snapshot(visibleRect: (x0: Int32, y0: Int32, x1: Int32, y1: Int32)? = nil) -> WorldSnapshot {
         let alive = citizens.filter { $0.alive }
         let meanH = alive.isEmpty ? 0 : Int32(alive.reduce(into: Int64(0)) { $0 += Int64($1.happiness) } / Int64(alive.count))
-        var visible = buildings
+        var visible = buildings.filter { $0.occupiesGround(on: map) }
         if let r = visibleRect {
-            visible = buildings.filter { building in
+            visible = visible.filter { building in
                 let x0 = map.x(of: building.anchor)
                 let y0 = map.y(of: building.anchor)
                 let x1 = x0 + building.kind.footprint.width - 1

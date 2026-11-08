@@ -136,8 +136,12 @@ extension SimulationEngine {
                 s.lastElectionDay = s.day
                 s.emit(.electionHeld, location: item.location, causes: item.causes, magnitude: option)
             }
-            s.emit(item.kind == .decree ? .decreeIssued : .agendaItemResolved,
-                   location: item.location, causes: item.causes, magnitude: option)
+            if item.islandEventID != nil {
+                IslandEvents.recordOutcome(&s, item: item, option: choice)
+            } else {
+                s.emit(item.kind == .decree ? .decreeIssued : .agendaItemResolved,
+                       location: item.location, causes: item.causes, magnitude: option)
+            }
             return .accepted
 
         case .resolveDecision(let did, let option):
@@ -192,7 +196,7 @@ extension SimulationEngine {
             // than topping up one market for half a day.
             let alive = Int32(s.citizens.reduce(into: 0) { $0 += $1.alive ? 1 : 0 })
             let bought = max(200, alive * s.config.foodPerCitizenPerDay * 4)
-            let markets = s.buildings.filter { $0.kind == .market && $0.isOperational }.map(\.id)
+            let markets = s.buildings.filter { $0.kind == .market && $0.isStanding(on: s.map) }.map(\.id)
             if !markets.isEmpty {
                 let share = bought / Int32(markets.count)
                 var handed: Int32 = 0
