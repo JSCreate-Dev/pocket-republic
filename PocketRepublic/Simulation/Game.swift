@@ -13,6 +13,17 @@ import PocketRepublicCore
     private let saveURL: URL?
 
     init() {
+        if let scene = ScreenshotFixture.scene {
+            hasPrototypeSave = false
+            let url = Self.fixtureSaveURL()
+            saveURL = url
+            state = ScreenshotFixture.makeState(for: scene)
+            saveIssue = nil
+            try? FileManager.default.removeItem(at: url)
+            save()
+            return
+        }
+
         hasPrototypeSave = UserDefaults.standard.object(forKey: "pocket.republic.save.v1") != nil
         let url = try? Self.makeSaveURL()
         saveURL = url
@@ -199,6 +210,14 @@ import PocketRepublicCore
         }
         for event in saved.events where !validLocation(event.location) { return false }
         return true
+    }
+
+    /// Temp file so a screenshot launch never reads or replaces a real city save.
+    private static func fixtureSaveURL() -> URL {
+        let folder = FileManager.default.temporaryDirectory
+            .appendingPathComponent("PocketRepublicScreenshotFixture", isDirectory: true)
+        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        return folder.appendingPathComponent("spatial-v1.json")
     }
 
     private static func makeSaveURL() throws -> URL {

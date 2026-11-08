@@ -4,7 +4,7 @@ import PocketRepublicCore
 struct MainView: View {
     @EnvironmentObject private var game: Game
     @EnvironmentObject private var clock: DayClock
-    @State private var tab = 0
+    @State private var tab = ScreenshotFixture.initialTab
     @State private var confirmNewCity = false
 
     var body: some View {
@@ -15,6 +15,7 @@ struct MainView: View {
             events.tabItem { Label("Gazette", systemImage: "newspaper.fill") }.tag(3)
         }
         .tint(.mint)
+        .modifier(ScreenshotFixtureIdentity())
         .onChange(of: game.state.pending?.id) { _, pendingID in
             if pendingID != nil { tab = 0 }
         }
