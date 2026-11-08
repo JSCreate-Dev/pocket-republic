@@ -3,6 +3,7 @@ import PocketRepublicCore
 
 struct MainView: View {
     @EnvironmentObject private var game: Game
+    @EnvironmentObject private var clock: DayClock
     @State private var tab = 0
     @State private var confirmNewCity = false
 
@@ -11,11 +12,16 @@ struct MainView: View {
             island.tabItem { Label("Island", systemImage: "map.fill") }.tag(0)
             people.tabItem { Label("People", systemImage: "person.3.fill") }.tag(1)
             govern.tabItem { Label("Govern", systemImage: "building.columns.fill") }.tag(2)
-            events.tabItem { Label("Events", systemImage: "newspaper.fill") }.tag(3)
+            events.tabItem { Label("Gazette", systemImage: "newspaper.fill") }.tag(3)
         }
         .tint(.mint)
         .onChange(of: game.state.pending?.id) { _, pendingID in
             if pendingID != nil { tab = 0 }
+        }
+        .onAppear { clock.note(game) }
+        .onChange(of: clockCue) { _, _ in clock.note(game) }
+        .onChange(of: confirmNewCity) { _, shown in
+            clock.setModal("new-city", presented: shown)
         }
         .confirmationDialog("Start a new city?", isPresented: $confirmNewCity) {
             Button("Start New City", role: .destructive) { game.startNewCity() }
@@ -77,22 +83,14 @@ struct MainView: View {
 
     private var events: some View {
         NavigationStack {
-            List(Array(game.state.events.reversed())) { event in
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(event.kind.title).font(.headline)
-                    Text("Day \(event.day)" + event.causes.first.map { " · \($0.detail)" }.orEmpty)
-                        .font(.caption).foregroundStyle(.secondary)
-                }
-            }
-            .navigationTitle("Events")
+            GazetteView()
+                .navigationTitle("Gazette")
+                .navigationBarTitleDisplayMode(.inline)
         }
     }
-}
 
-private extension Optional where Wrapped == String {
-    var orEmpty: String { self ?? "" }
-}
-
-private extension EventKind {
-    var title: String { rawValue.replacingOccurrences(of: "([a-z])([A-Z])", with: "$1 $2", options: .regularExpression).capitalized }
+    private var clockCue: String {
+        let agenda = game.state.agenda.map { "\($0.id.raw):\($0.islandEventID ?? -1)" }.joined(separator: ",")
+        return "\(game.state.day)|\(game.state.blocksAdvance)|\(game.saveIssue ?? "")|\(agenda)"
+    }
 }

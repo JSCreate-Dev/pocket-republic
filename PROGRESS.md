@@ -12,19 +12,17 @@ Jordan wants Pocket Republic to feel like a lively, living world with a real gam
 
 ## Current state
 
-Code snapshot: presentation branch `cursor/construction-presentation-b8f6`, cut from main `3df2368` (25 October 2026, PR #24). Main's **Build iOS IPA** for that commit succeeded ([run 40244319564](https://github.com/JSCreate-Dev/pocket-republic/actions/runs/40244319564)). This branch does not change `PocketRepublicCore`. The iOS build of this diff is unverified until CI runs it. No iPhone, simulator, or Swift toolchain was available here.
+Code snapshot: integration branch `cursor/island-events-pacing-b8f6`, cut from main `6278c09`. Main is PR #26 at `8c4accd` (construction presentation) and PR #27 at `6278c09` (demolished buildings stop acting, market cap 21 for a new city, six island events). PR #27's core log is `docs/log/2026-11-07-core-lifecycle-events.md`. Its **Build iOS IPA** on `30e6b89` succeeded ([run 42427776978](https://github.com/JSCreate-Dev/pocket-republic/actions/runs/42427776978)). This branch does not change `PocketRepublicCore`. No iPhone or simulator was available here.
 
-PR #24 is on main: a placed building is a site (`foundation`, then `scaffold`, then `complete`) measured in whole sim-days (2 house; 3 police, market, workshop, farm; 4 clinic, school, dock; 0 town hall). PR #22's eight `site_foundation_*` and `site_scaffold_*` imagesets are on main, and PR #23's finished market, workshop, and dock sit on their real diamonds. This branch is the presentation pass those left open: the scene draws the stage the core reports, and the controls below.
+PR #24 remains the construction clock in the core: foundation, scaffold, complete, in whole sim-days. PR #26 draws those stages. PR #27 did not retune build times. A demolished building is no longer a ghost workplace: `isStanding(on:)` is the economy gate, and `visibleBuildings` omits rubble. Sites still draw, because they own their tiles.
 
-Open, and not modified: PR #25 (`swift/duo-posture-layouts`) and PR #10 (`cursor/game-feel-ui-6005`, conflicting with main). Their useful presentation was adapted here. Neither branch was pushed to, closed, or merged. PR #10's core files (`CauseCopy`, `DecreeCardCopy`, `EventGazette`, `GazetteTests`) were not copied. The gazette and the rest of the event UI stay out until the core event pass lands.
+`PocketRepublicCore` on main `6278c09` has **100** tests, 0 failures, 159 s debug, measured in PR #27 (the previous 88 plus 3 lifecycle, 8 island-event, and 1 service-cap). This branch did not re-run them and did not edit a test. Seed 2026 for 200 days in that log: hungry 0, market coverage 100% in every district, with `maxServiceDistance` 21 on a new city. A save that already stores 20 keeps 20. A later core check of that merged deck, reported with this integration and not re-run here, passed 6 seeds plus save/load, RNG continuity, and no double resolution. No further core commit is waiting on that check. The core README's release timing was not re-measured. No iPhone run was part of that check.
 
-`PocketRepublicCore` on main contains **88** `func test` methods, 17 of them `ConstructionTests`. PR #24 measured the suite in the `swift:6.2` Docker image: 88 tests, 0 failures, 288 s debug, after a 71-test baseline. This presentation branch did not re-run them and did not edit a test. There is no Swift toolchain in this environment. The core README's release timing (about 0.52 ms/tick at 1000 citizens) was not re-measured.
-
-The repo is a SwiftUI app plus a SpriteKit island. The simulation is the pure-Swift package `PocketRepublicCore` (tools version 6.0, deployment target iOS 17). The core sources import Foundation only. The app sends `PlayerIntent` values into `SimulationEngine` and draws a read-only `WorldSnapshot`. The clock advances only when **Next Day** (closed screen) or **Advance One Day** (split pane) is pressed. Both call `Game.advance()`. Animated walkers, the day/night wash, scaffold builders, and the completion pop do not write simulation state. Core rules for determinism, money, food, crises, tick order, balance data, and saves are in [AGENTS.md](AGENTS.md) and [PocketRepublicCore/README.md](PocketRepublicCore/README.md). Follow those. Do not re-derive them from this summary.
+The repo is a SwiftUI app plus a SpriteKit island. The simulation is the pure-Swift package `PocketRepublicCore` (tools version 6.0, deployment target iOS 17). The core sources import Foundation only. The app sends `PlayerIntent` values into `SimulationEngine` and draws a read-only `WorldSnapshot`. **Next Day** (closed screen) and **Advance One Day** (split pane) both call `Game.advance()`. The day-speed menu can repeat that same call on one app-owned timer. It starts paused. It does not run while the app is inactive, while a confirmation is open, while a crisis blocks the day, or while an island event is still on the agenda, and it never catches up days that passed in the background. Animated walkers, the day/night wash, scaffold builders, and the completion pop do not write simulation state. A stage still changes only when a sim-day advances. Core rules for determinism, money, food, crises, tick order, balance data, and saves are in [AGENTS.md](AGENTS.md) and [PocketRepublicCore/README.md](PocketRepublicCore/README.md). Follow those. Do not re-derive them from this summary.
 
 The core has agenda, decrees, and factions. `DecreeCatalogue` is data applied through `RepublicState.apply`. `DecreeSpec` has `name`, `cost`, `salience`, and `effect`. It has no flavor string. Factions are `labourers`, `merchants`, `officials`, and `landless`. Only a crisis or an election blocks the day advance. The standing agenda does not.
 
-Four tabs: Island, People, Govern, and Events. Govern is decree cards, legitimacy, corruption, the income-tax stepper, the non-decree council, and Start New City. People is one card per living citizen. Events is still the row list, newest first, with a prettified `EventKind` title and the first cause's detail. The cause's number is omitted. The newspaper feed is not built.
+Four tabs: Island, People, Govern, and Gazette. Govern is decree cards, legitimacy, corruption, the income-tax stepper, council and island-event cards, and Start New City. People is one card per living citizen. The Gazette groups the core event log by day. An island event shows its filled headline and, once answered, the outcome sentence. `IslandEventPaper` drops only the earlier raise whose event id that outcome answers, so a later card with the same headline stays. `AgendaSheetOrder` puts a crisis-tier row, including an election, ahead of an island event. Both are readers. They do not post cards or change a save. The package tests cover those two regressions. Ordinary news gets a headline and a because-line. The raw `flavor: <day>` line is not shown. On the island sheet an election, or any other agenda row with crisis tier, outranks an island event. The one-card phone preview is that blocking choice, and an island card does not auto-open over it. Play cannot advance while `blocksAdvance` is true.
 
 ### Multi-tile footprints (PR #12)
 
@@ -36,7 +34,7 @@ A new city uses `WorldGenerator.generate`, whose default `size` is 64, so the is
 
 The surplus-and-hungry failure is fixed. Farms used to ship a whole day's output to the single nearest market, that market paid for food it could not sell and went broke, and distance was measured on the floor tile instead of the door. `distributeFood` now shares the day's sales: one unit per farm per pass, shopper shortfall first (the food still moves when the till cannot prepay), then paid surplus to markets that can buy without spending wage money. Reach, feeding, coverage, faction tallies, and the no-market penalty all use the door.
 
-On seed 2026, four households stay hungry because their doors are 21 road tiles from the nearest market, one past `maxServiceDistance` (20). Multi-tile footprints block every tile but the entrance, so that walk is one step longer than when a building was a single passable tile. `HungerTests.testSurplusDoesNotLeaveCitizensHungry` runs seeds 2026 and 11 for 120 days. From day 40 it requires nobody inside the cap to be hungry, and it locks those four as the only exception on seed 2026. Seed 11 must have zero. The city stays in surplus. Those four are tuning for the next round. They are not a return of the distribution bug.
+PR #27 set `maxServiceDistance` to 21 for a new city, which is the extra step a footprint adds between a door and the road. `HungerTests` on main now requires nobody hungry inside or past that cap on seeds 2026 and 11, and it locks the fresh default at 21. A save that already stored 20 keeps 20. The map is still 64×64. The design doc still says 96×96.
 
 ### Tap-to-inspect (PR #7)
 
@@ -72,7 +70,7 @@ The core rules from PR #24 are unchanged and still the source of truth. `Buildin
 
 Transitions play once per stage change, remembered on the scene by building id. The first picture of a city or a loaded save is quiet: existing buildings, including ones already under construction, do not bounce or pop just because the view drew them. A building placed during play lands with a short scale bounce and a dust puff. Foundation to scaffold cross-fades in about 0.2 seconds. Scaffold to complete (or foundation straight to complete when the build is one day) plays the pop: scale 0.85 → 1.06 → 1.00, a larger dust ring, and one light haptic. Panning, folding, resizing, and the extra `render` from saving do not start those actions again. Culling a sprite and bringing it back does not replay a transition that already played. Two decorative builders and a pennant walk a scaffold; they are not citizens and write no state. They are removed when the building opens.
 
-The clock is still **Next Day**. Walkers keep playing a 48-second visual day over a paused sim day. Construction progress does not tick in real time. The inspect progress row says it advances when Next Day is pressed. There is no continuous simulation behind the animation.
+Walkers keep playing a 48-second visual day over a paused sim day. Construction progress does not tick between days. The inspect row says the stage changes when the sim-day advances, and that Play uses that same step and starts paused. There is no continuous simulation behind the sprite.
 
 The inspect panel keeps the core's status string and paints it as a timber banner, with the stage and day count, a progress bar from the core's percent, **Cancel construction** (no refund), and "Takes effect when it opens" on the mode picker. `InspectTone` is still `.calm`. Adding `.progress` would be a core change and was left for the core owner. A service ghost that will not work yet is captioned `Reach when it opens, in N days`.
 
@@ -80,11 +78,13 @@ The inspect panel keeps the core's status string and paints it as a timber banne
 
 Closed portrait and landscape keep the map full width. Controls sit in a bottom sheet, half height until the grabber is dragged or tapped, with **Next Day** pinned under the scrolling tools and inspect card. A wide flat window splits into map and control panes. Book and laptop folds still follow `reservedRegions` on iOS 27.1. Outer landscape can switch to a map-first tent dock; the scene cannot tell that posture from ordinary landscape, so the player chooses it. This is PR #25's layout, with the grabber and Next Day kept outside the scroll so the closed screen stays playable. Footprints, road overlays, building anchors, and walker routes are the same scene as main.
 
-People are cards (hungry first, initials portrait, happiness, money, hunger). Govern shows decree cards from `DecreeCatalogue` and `AgendaEffect`: title, cost or Free, "Need N more", faction arrows, and the effect lines the spec already stores. **Issue decree** sends the enact option. **Not now** only closes the card, because the core's dismiss option would remove the offer and emit `decreeIssued`. There is no flavor line: `DecreeSpec` has no `flavor` field. The island still has the crisis card and agenda previews. The Events tab is still the row list. The gazette was not brought over.
+People are cards (hungry first, initials portrait, happiness, money, hunger). Govern shows decree cards from `DecreeCatalogue` and `AgendaEffect`: title, cost or Free, "Need N more", faction arrows, and the effect lines the spec already stores. **Issue decree** sends the enact option. **Not now** only closes the card, because the core's dismiss option would remove the offer and emit `decreeIssued`. There is no decree flavor line: `DecreeSpec` has no `flavor` field.
+
+Island events from PR #27 are ordinary agenda rows with `islandEventID`. The island sheet and Govern show `spec.title`, tone, the filled headline, the flavor sentence, why it fired, and the core's option buttons. A button whose `treasuryCost` is above the treasury is disabled and says how much is missing. The lapse line names the free option and the last open day. **Not now** only hides the card. Expiry still applies that free option inside `advance`, and it does not spend the treasury. A council row with no `islandEventID` keeps a plain title, a because-line, and the same affordability rule. The closed-screen preview puts an island event ahead of a decree so the one visible card is the event.
 
 ### Spec that is not built
 
-[docs/DESIGN.md](docs/DESIGN.md) sections 4, 5, and 6 are spec only. There is no `CitizenMind` or `Narrator` type in the core. Section 4 is citizen needs, traits, opinion of El Presidente, gossip, and choices with visible causes, plus the seeded-roll contract. Section 5 is a 14-event random deck and rare one-off events. Section 6 is the small on-device model: it may pick among options the core has already validated and write flavor text, the answer used is written into the save, and the rule-based mind is the fallback. The minimum target stays iOS 17.
+[docs/DESIGN.md](docs/DESIGN.md) sections 4 and 6 are spec only. There is no `CitizenMind` or `Narrator` type. Section 5's deck is six cards in the core (carnival, celebrity visit, smuggler ring, fishing bonanza, generous expat, foreign trade offer), posted as advisory agenda rows. Hurricane, strike, blight, the rest of the 14, and the rare one-offs are not built. Section 6, the on-device model, is not built. The minimum target stays iOS 17.
 
 ## Owner playtest feedback (Oct 25, 2026)
 
@@ -99,49 +99,49 @@ Footprints and tap-to-inspect are on main. PR #17 replaced the shuttling dots wi
 
 ## Known issues
 
-- **Four households sit one tile past market range.** Seed 2026, 250 citizens: from day 40, four doors are 21 road tiles from the nearest market. `maxServiceDistance` is 20. Everyone inside the cap is fed, and the city has a food surplus. Seed 11 has nobody past the cap. Next round item 4 is the tuning pass.
+- **A stored city can still have market cap 20.** New cities use 21. PR #27's hunger test expects zero hungry on seeds 2026 and 11 at that cap. The map is still 64×64 against the design's 96×96.
 - **Batch 2 presentation is partial.** `IslandScene` draws the terrain, roads, decorations, and walker sprites. Water animation and palm sway are static. Cart images and most batch 2 UI icons are still not referenced by Swift. Market, workshop, and dock use the corrected diamonds from PR #23.
-- **Nothing in this presentation pass has a device playtest.** Stage sprites, the pop, scaffold builders, the bottom sheet, tent mode, decree cards, and walker pacing all need an iPhone. CI is the first compile.
-- **Events still read as rows.** The list can repeat a kind and drops `CauseFactor.value`. Some negative events can still omit a cause. Decree cards are on Govern, but `DecreeSpec` has no `flavor` field, so the flavor line is absent. The gazette is not built. PR #10 stays open and conflicting; do not treat it as the current UI.
+- **No device playtest of this tree.** Stage sprites, the pop, the sheet, island-event cards, the Gazette, and day speed need an iPhone. CI is the compile check.
+- **Decrees still have no flavor string.** `DecreeSpec.flavor` is a core addition. The Gazette is a reading of the existing log, not the full section 3 newspaper (no Show me camera pan, and some headlines are generic when the event has no place or name). PR #10 stays open and conflicting. Do not treat it as the current UI.
 - **Inspect has no wiggle and no follow.** The panel sits in the bottom sheet when the phone is closed and in the side pane when the window is split. Tapping a building does not wiggle the sprite. Tapping a resident does not follow them.
 - **Two save leftovers.** `pocket.republic.save.v1` is detected and never migrated. A spatial file from schema 1 or 2 does not decode under schema 3. The app keeps that file until **Start New City**.
-- **A new city is 64×64.** The design doc says 96×96. See next round item 7.
+- **A new city is 64×64.** The design doc says 96×96. See next round item 4.
 
 ## Open items
 
-Finished on main, and not open: multi-tile footprints (PR #12), the surplus hunger fix (PR #11 and PR #14), tap-to-inspect (PR #7), the placement ghost and finished-sprite rendering (PR #9 and PR #4), walker routines (PR #15 and PR #17), the unsigned IPA and bundle id `com.jscreate.pocketrepublic` (PR #5), the nine building imagesets (PR #4), the batch 2 catalog (PR #6), construction-stage core state (PR #24), the eight site imagesets (PR #22), and the non-square finished sprites (PR #23). This branch wires the site sprites, the pop, the closed-screen sheet, decree cards, and citizen cards. The ordered work is **Next round**.
+Finished on main: footprints, the hunger fix through PR #27's cap of 21, tap-to-inspect, sprites and the placement ghost, walker routines, the unsigned IPA, construction stages in the core and on the island (PR #24 and PR #26), the eight site imagesets, the non-square finished sprites, and the six-card island deck plus demolished-building lifecycle (PR #27). This branch is the player-facing reading of those events, plus an optional day timer. The ordered work is **Next round**.
 
 ### Game Designer
 
-Section 7 is written and the core plus the stage art plus the stage rendering now exist. One open design question remains: a commission is still raised at placement, days before a farm opens. Sections 4–6 are still spec only.
+Section 7 is in the game. One open design question remains: a commission is still raised at placement, days before a farm opens. Sections 4 and 6, and the rest of section 5, are still spec.
 
 ### Game Logic
 
-Construction state is built. Still open, and owned by the core pass rather than this presentation branch: `CauseKind.underConstruction` (spec 7.9, optional), `DecreeSpec.flavor`, a cause on every negative event, then citizen minds and the random deck (sections 4–5), the on-device model hook (section 6), and market-range and map tuning. Deferred inside 7.13: real builder citizens, material costs, `demolishRefundPercent`. The presentation pass did not need a new core method to draw stages. `InspectTone.progress` is the one small additive case that would let the panel stop treating construction as `.calm`. It is optional. The app already paints that row.
+Still open, and not this branch: `DecreeSpec.flavor`, a cause on every negative event that still lacks one, the other eight section 5 cards and the rare one-offs, citizen minds, the on-device model hook, and a 96×96 map. `CauseKind.underConstruction` (spec 7.9) is still optional. Deferred inside 7.13: real builder citizens, material costs, `demolishRefundPercent`. `InspectTone.progress` is optional. The app already paints that row. Day pacing did not need a core clock.
 
 ### Visual And Grapchics
 
-The eight site imagesets and the corrected 3×2 and 2×3 finished sprites are on main. Water animation, palm sway, carts, and a sound for the placement and the pop are still unwired. No new art was drawn on this branch.
+Site art and the corrected diamonds are on main. Water, palms, carts, and a sound for place and open are still unwired. No new art is in this branch.
 
 ### Ios Dev
 
-Stage rendering, the pop, the construction inspect copy, the bottom sheet, and the decree and citizen cards are in this branch and waiting on CI plus a phone playtest. Still open: the gazette, once the core event pass has flavor and causes; the inspect wiggle and follow-a-resident; a sound hook with a real asset. A player-chosen panel layout stays deferred. PR #10 and PR #25 stay open. Do not rebase them onto this branch and do not close them from here.
+Island-event cards, the Gazette, and the paused-by-default day speed are in this branch, waiting on CI and a phone playtest. Still open: a fuller newspaper (Show me, tighter headlines), the inspect wiggle, and follow-a-resident. A player-chosen panel layout stays deferred. PR #10 and PR #25 stay open. Do not rebase them and do not close them from here. Do not reopen PR #26.
 
 ## Next round (priority order)
 
-1. **Playtest this presentation on an iPhone.** Place a house (2 days), a market (3), and a clinic (4). Confirm the foundation is immediate, the sprite changes only when Next Day is pressed, the scaffold shows two builders, the opening pop plays once, a loaded or newly generated city does not pop its finished buildings, and Cancel construction clears the plot without a refund. Fold and rotate: the map stays full width with the sheet on a closed phone, and the controls move to the other pane when the window is wide or the fold reports a seam. Issue a decree from Govern and confirm Not now does not spend it.
+1. **Phone playtest of the player loop.** Place a house and let it rise with Next Day, then with Steady play, and confirm the sprite changes only on a sim-day. Leave the app and confirm no days pass in the background. On day 120, if an election and an island event are both open, the election is the card on the closed phone, Next Day stays disabled, and Play does not skip it. Not now on the island event must not be the only control left. The Gazette should show a repeated carnival in the same district, not only the first one. Fold and rotate while play is on and confirm a single timer, not a burst of days.
 
-2. **Gazette, after the core event pass.** `DecreeSpec.flavor` and a cause on every negative event are Game Logic. Then Ios Dev can group the event log into the newspaper from design section 3. Do not build that UI against today's rows, and do not revive PR #10 by rebasing it. PR #10's core types are not on main.
+2. **The rest of the event deck, and decree flavor.** Core owns the other cards and `DecreeSpec.flavor`. The card and the Gazette already have a place to show flavor when that string exists.
 
-3. **Inspect wiggle, follow-a-resident, and the remaining ambient art.** The selected sprite should wiggle. Tapping a resident should follow them. Water, palms, and carts are still static or unused. A short sound on place and on open needs an asset; this branch only has the haptic and the dust.
+3. **Inspect wiggle, follow-a-resident, and the remaining ambient art.** Water, palms, carts, and a real sound asset.
 
-4. **Market range and map tuning.** The four seed-2026 doors at distance 21, and 64×64 versus the design's 96×96. Re-read `HungerTests` and the economy dashboard after any change. Core only.
+4. **Map size.** 64×64 versus the design's 96×96. The market cap for a new city is already 21.
 
-5. **Citizen minds and the random event deck.** [docs/DESIGN.md](docs/DESIGN.md) sections 4 and 5. Rolls stay on seeded streams.
+5. **Citizen minds.** [docs/DESIGN.md](docs/DESIGN.md) section 4. Rolls stay on seeded streams.
 
-6. **The small on-device model hook.** Section 6. The model picks among options the core already validated. iOS 17 stays the minimum. Version 1 can ship rule-based only.
+6. **The small on-device model hook.** Section 6. iOS 17 stays the minimum.
 
-7. **Custom iPhone Duo layouts.** Let the player choose what each panel shows. Deferred until the sheet and the fold split have been played.
+7. **Custom iPhone Duo layouts.** Deferred until this loop has been played.
 
 ## Team and process
 

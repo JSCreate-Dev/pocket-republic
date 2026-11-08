@@ -7,6 +7,7 @@ import PocketRepublicCore
 /// itself to the bottom of the screen. Hosts put it in a column, a side pane, or
 /// a sheet of their own. The island currently drops it in the controls rail.
 struct BuildingInspectPanel: View {
+    @EnvironmentObject private var clock: DayClock
     let inspection: BuildingInspection
     /// The core still reports construction with `InspectTone.calm`. The panel paints
     /// that row itself so a site does not look like a fault or like a finished building.
@@ -52,6 +53,12 @@ struct BuildingInspectPanel: View {
         .accessibilityElement(children: .contain)
         .onChange(of: inspection.buildingID) { _, _ in
             confirmDemolish = false
+        }
+        .onChange(of: confirmDemolish) { _, shown in
+            clock.setModal("demolish", presented: shown)
+        }
+        .onDisappear {
+            clock.setModal("demolish", presented: false)
         }
         .confirmationDialog(
             underConstruction ? "Cancel construction of this \(inspection.name)?" : "Demolish this \(inspection.name)?",
@@ -128,7 +135,7 @@ struct BuildingInspectPanel: View {
                     }
                     ProgressView(value: fraction)
                         .tint(Color(red: 0.62, green: 0.42, blue: 0.18))
-                    Text("Advances when you press Next Day.")
+                    Text("Changes when the sim-day advances. Play uses that same step and starts paused.")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                 }

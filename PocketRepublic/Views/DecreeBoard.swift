@@ -73,7 +73,12 @@ struct DecreeBoard: View {
     }
 
     @ViewBuilder private var council: some View {
-        let items = game.state.agenda.filter { $0.kind != .decree }
+        let items = game.state.agenda.filter { $0.kind != .decree }.sorted { lhs, rhs in
+            func rank(_ item: AgendaItem) -> Int {
+                AgendaSheetOrder.rank(tier: item.tier, isIslandEvent: item.islandEventID != nil, isDecree: item.kind == .decree)
+            }
+            return rank(lhs) < rank(rhs)
+        }
         if !items.isEmpty {
             Text("Before the council")
                 .font(RepublicTheme.heading(.title3))
@@ -164,26 +169,15 @@ struct DecreeBoard: View {
     }
 
     private func councilCard(_ item: AgendaItem) -> some View {
-        VStack(alignment: .leading, spacing: RepublicTheme.Space.sm) {
-            Text(item.kind.councilTitle)
-                .font(RepublicTheme.heading(.headline))
-            if let cause = item.causes.first {
-                Text("\(cause.detail): \(cause.value)")
-                    .font(RepublicTheme.body(.caption))
-                    .foregroundStyle(RepublicTheme.inkSoft)
+        AgendaChoiceCard(
+            item: item,
+            treasury: game.state.treasury,
+            day: game.state.day,
+            saveBlocked: game.saveIssue != nil,
+            onResolve: { option in
+                game.send(.resolveAgendaItem(item.id, option: option))
             }
-            ForEach(item.options) { option in
-                Button {
-                    game.send(.resolveAgendaItem(item.id, option: option.id))
-                } label: {
-                    Text(option.label)
-                        .frame(maxWidth: .infinity, minHeight: 44)
-                }
-                .buttonStyle(.bordered)
-                .disabled(game.saveIssue != nil)
-            }
-        }
-        .dioramaCard(fill: RepublicTheme.sand.opacity(0.28))
+        )
     }
 }
 
@@ -226,7 +220,7 @@ struct DecreeCardReading: Identifiable {
             shortfall: shortfall,
             canAfford: shortfall == nil,
             chips: chips(factions: spec.effect.favorFactions, deltas: spec.effect.favorDeltas),
-            effects: effectLines(spec.effect),
+            effects: AgendaEffectCopy.lines(spec.effect),
             agendaID: offer?.id,
             enactOption: enact?.id
         )
@@ -255,39 +249,4 @@ struct DecreeCardReading: Identifiable {
         return String(repeating: delta > 0 ? "▲" : "▼", count: count)
     }
 
-    private static func effectLines(_ effect: AgendaEffect) -> [String] {
-        var lines: [String] = []
-        if effect.foodImport > 0 { lines.append("Brings in \(effect.foodImport) food") }
-        if effect.legitimacy != 0 { lines.append(signed("Legitimacy", effect.legitimacy)) }
-        if effect.corruption != 0 { lines.append(signed("Corruption", effect.corruption)) }
-        if effect.incomeTaxDelta != 0 { lines.append(signed("Income tax", effect.incomeTaxDelta, suffix: " points")) }
-        if effect.businessTaxDelta != 0 { lines.append(signed("Business tax", effect.businessTaxDelta, suffix: " points")) }
-        if effect.civicWageDelta != 0 { lines.append(signed("Civic wage", effect.civicWageDelta)) }
-        if effect.districtUnrest != 0 { lines.append(signed("District unrest", effect.districtUnrest)) }
-        if effect.districtNeglectReset { lines.append("Clears neglect in the district") }
-        if effect.treasuryGain > 0 { lines.append("Treasury gains $\(effect.treasuryGain)") }
-        return lines
-    }
-
-    private static func signed(_ title: String, _ value: Int32, suffix: String = "") -> String {
-        let mark = value > 0 ? "+" : ""
-        return "\(title) \(mark)\(value)\(suffix)"
-    }
-
-    private static func signed(_ title: String, _ value: Int64, suffix: String = "") -> String {
-        let mark = value > 0 ? "+" : ""
-        return "\(title) \(mark)\(value)\(suffix)"
-    }
-}
-
-private extension AgendaKind {
-    var councilTitle: String {
-        switch self {
-        case .factionDemand: return "Faction demand"
-        case .advisoryTradeoff: return "Council advice"
-        case .decree: return "Decree"
-        case .buildingCommission: return "Building commission"
-        case .election: return "Election"
-        }
-    }
 }
