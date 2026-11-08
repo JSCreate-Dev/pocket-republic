@@ -164,8 +164,8 @@ public enum SimulationEngine {
             case .workshop, .dock:
                 // Exports: the only money entering the island, and it is recorded.
                 let base = Int64(workers) * s.config.workshopOutputPerWorker * scale / 100
-                let bonus = RepublicSeasonBook.harborOutputBonus(workers: workers, scale: scale, in: s)
-                s.transfer(from: .external, to: .building(b.id), base + bonus)
+                let bonus = RepublicOriginBook.exportAdjustment(workers: workers, scale: scale, in: s)
+                s.transfer(from: .external, to: .building(b.id), max(0, base + bonus))
             default:
                 break
             }
@@ -431,7 +431,7 @@ public enum SimulationEngine {
     static func payUpkeep(_ s: inout RepublicState) {
         var total: Int64 = 0
         for b in s.buildings where b.kind != .house && b.isStanding(on: s.map) {
-            total += b.kind.isCivic ? s.config.upkeepCivic : s.config.upkeepPrivate
+            total += b.kind.isCivic ? RepublicOriginBook.civicUpkeep(in: s) : s.config.upkeepPrivate
             total += RepublicSeasonBook.granaryUpkeepSurcharge(for: b, in: s)
         }
         let paid = s.transfer(from: .treasury, to: .external, total)

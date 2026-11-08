@@ -23,10 +23,11 @@ struct MainView: View {
         .onChange(of: confirmNewCity) { _, shown in
             clock.setModal("new-city", presented: shown)
         }
-        .confirmationDialog("Start a new city?", isPresented: $confirmNewCity) {
-            Button("Start New City", role: .destructive) { game.startNewCity() }
-        } message: {
-            Text("This replaces the spatial city save. Your earlier prototype save stays untouched.")
+        .sheet(isPresented: $confirmNewCity) {
+            NewCitySheet { origin in
+                game.startNewCity(origin: origin)
+                confirmNewCity = false
+            }
         }
     }
 
@@ -92,5 +93,52 @@ struct MainView: View {
     private var clockCue: String {
         let agenda = game.state.agenda.map { "\($0.id.raw):\($0.islandEventID ?? -1)" }.joined(separator: ",")
         return "\(game.state.day)|\(game.state.blocksAdvance)|\(game.saveIssue ?? "")|\(agenda)"
+    }
+}
+
+private struct NewCitySheet: View {
+    var start: (RepublicOrigin?) -> Void
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("The current city is replaced only when you pick a start. Your earlier prototype save stays.")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    originRow(nil, "An ordinary island", "No special purse and no special grudge. The charter is still yours to earn.")
+                    ForEach(RepublicOrigin.allCases, id: \.rawValue) { origin in
+                        originRow(origin, origin.title, origin.pitch)
+                    }
+                }
+                .padding(16)
+            }
+            .navigationTitle("New city")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+            }
+        }
+    }
+
+    private func originRow(_ origin: RepublicOrigin?, _ title: String, _ pitch: String) -> some View {
+        Button {
+            start(origin)
+        } label: {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(title).font(.headline)
+                Text(pitch)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+            .padding(12)
+        }
+        .buttonStyle(.bordered)
     }
 }

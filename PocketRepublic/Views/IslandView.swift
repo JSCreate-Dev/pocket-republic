@@ -301,7 +301,8 @@ struct IslandView: View {
     /// A choice that blocks the day outranks an island event. On a one-card
     /// phone sheet the first rank is the only button, so the election stays reachable.
     private func previewRank(_ item: AgendaItem) -> Int {
-        AgendaSheetOrder.rank(tier: item.tier, isIslandEvent: item.islandEventID != nil, isDecree: item.kind == .decree)
+        AgendaSheetOrder.rank(tier: item.tier, isIslandEvent: item.islandEventID != nil,
+                              isDecree: item.kind == .decree, isOriginDilemma: item.originDilemma == true)
     }
 
     @ViewBuilder private func agendaPreviews(layout: CityDisplayLayout) -> some View {
@@ -341,6 +342,7 @@ struct IslandView: View {
 
     private func previewTitle(_ item: AgendaItem) -> String {
         if item.tier == .crisis { return "\(item.kind.cityTitle) · day is waiting" }
+        if item.originDilemma == true { return item.causes.first?.detail ?? "Opening" }
         return item.islandEvent?.title ?? item.kind.cityTitle
     }
 

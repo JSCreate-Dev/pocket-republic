@@ -24,6 +24,15 @@ struct SeasonCard: View {
         .foregroundStyle(Color(red: 0.28, green: 0.18, blue: 0.08))
     }
 
+    private var originLine: String {
+        switch game.state.origin {
+        case .marque: return "The old flag is still in the locker."
+        case .parade: return "The square still has his name on it."
+        case .commonPot: return "The neighbours already put a pot on the fire."
+        case nil: return ""
+        }
+    }
+
     private var title: String {
         switch status.beat {
         case .breakGround: return "Charter: break ground"
@@ -37,8 +46,8 @@ struct SeasonCard: View {
         switch status.beat {
         case .breakGround:
             return status.foundingReady
-                ? "A building you placed is open. Seal the charter for $\(RepublicSeasonBook.foundingGrant) and the two compacts."
-                : "Place a building and open it. Houses the island started with do not count."
+                ? "A building you placed is open. Seal the charter and the treasury receives $\(RepublicSeasonBook.foundingGrant). Then choose one compact."
+                : "Place a building and open it. Houses the island started with do not count. \(originLine)"
         case .chooseCompact:
             return "One compact, for $\(RepublicSeasonBook.pathCost). The other closes. This changes every later day, not just the score."
         case .settle:
@@ -56,7 +65,7 @@ struct SeasonCard: View {
     @ViewBuilder private var actions: some View {
         switch status.beat {
         case .breakGround:
-            Button("Seal the charter") { game.send(.advanceSeason(.claimFounding)) }
+            Button("Seal the charter · receive $\(RepublicSeasonBook.foundingGrant)") { game.send(.advanceSeason(.claimFounding)) }
                 .buttonStyle(.borderedProminent)
                 .disabled(!status.foundingReady || game.saveIssue != nil)
         case .chooseCompact:
@@ -111,7 +120,9 @@ enum SeasonCopy {
         if season?.settledClaimed == true { return "The republic is settled." }
         if season?.path == .harbor { return "Harbor compact is in force." }
         if season?.path == .granary { return "Granary compact is in force." }
-        if season?.foundingClaimed == true { return "Charter sealed." }
+        if season?.foundingClaimed == true {
+            return "Charter sealed. The treasury received $\(RepublicSeasonBook.foundingGrant). Choose one compact."
+        }
         return "The season moved."
     }
 }

@@ -19,3 +19,17 @@ The island shows the current beat without covering the map or Next Day. A claim 
 ## Not claimed
 
 No iPhone and no simulator. The unsigned IPA workflow is unchanged and is the device compile.
+
+## 2026-11-07 10:05 PM EST — same branch, origins and the charter line
+
+The charter card on `c8bcdcf` said the seal cost $120. `claimFounding` pays $120 into the treasury. The ready line, the button, and the banner now say the treasury receives $120, then the player chooses one compact. Season rules are otherwise unchanged.
+
+**Start New City** now asks before it replaces the city. Ordinary leaves `origin` nil. Three origins stamp once inside `WorldGenerator.generate` and are read again each tick:
+
+- Letters of Marque: corruption 28, legitimacy 52, +$400, merchants +6, officials −6. Later days: +$1 per dock or workshop worker, spoilage +2. Dilemma: pay the crew ($100, corruption −6, legitimacy +5, labourers +4) or keep a cut (+$140, corruption +5, merchants +5, landless −3).
+- The General's Square: corruption 16, legitimacy 78, officials +8, labourers −8, landless −6. Later days: civic upkeep −$1 (floor 0), unemployment penalty +1. Dilemma: take the portraits down (legitimacy −5, unrest +3, labourers +6, landless +4, officials −5) or leave the name (legitimacy +4, officials +6, labourers −4).
+- The Common Pot: −$600 when the treasury can cover it, +40 food on each standing market recorded as imported, labourers +4, merchants −4. Later days: spoilage −2 (floor 0), export coin −$1 per worker, pay clamped at 0. Dilemma: open the stores (50 food, landless +5, merchants −3) or sell a share (+$160, merchants +5, landless −4).
+
+The dilemma is advisory, ranked under a crisis and over an island event, and it does not open itself on top of an election. It expires on day 6 with ignore cost 0, so a lapse only removes the card. The compact is still chosen after the charter. `OriginTests` covers the three openings, replay, a nil save with no `origin` key, one resolution, spoilage and civic upkeep, a compact still available after an origin, and a short path that seals the charter for each origin. The trace is printed as `ORIGIN ...`.
+
+No iPhone and no simulator. The unsigned IPA workflow is unchanged.

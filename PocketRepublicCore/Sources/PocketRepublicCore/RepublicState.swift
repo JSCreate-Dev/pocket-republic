@@ -57,6 +57,8 @@ public struct RepublicState: Codable, Sendable {
     public var islandEventLog: IslandEventLog?
     /// Nil on a city saved before the season. Claiming writes it once.
     public var republicSeason: RepublicSeason?
+    /// Nil on an ordinary island and on a save from before origins existed.
+    public var origin: RepublicOrigin?
 
     /// A day-advance is blocked only by genuine crises, not by the standing agenda.
     public var blocksAdvance: Bool {

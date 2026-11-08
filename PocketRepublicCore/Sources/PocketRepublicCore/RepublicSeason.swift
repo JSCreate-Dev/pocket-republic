@@ -98,15 +98,16 @@ public enum RepublicSeasonBook {
     }
 
     public static func spoilagePercent(in state: RepublicState) -> Int32 {
-        let base = state.config.marketSpoilagePercent
-        guard state.republicSeason?.path == .harbor else { return base }
-        return base + harborSpoilageExtra
+        var percent = state.config.marketSpoilagePercent
+        if state.republicSeason?.path == .harbor { percent += harborSpoilageExtra }
+        percent += RepublicOriginBook.spoilageAdjustment(in: state)
+        return max(0, percent)
     }
 
     public static func unemploymentPenalty(in state: RepublicState) -> Int32 {
         let base = state.config.unemploymentPenalty
-        guard state.republicSeason?.settledClaimed == true else { return base }
-        return max(0, base - 1)
+        let settled = state.republicSeason?.settledClaimed == true ? max(0, base - 1) : base
+        return settled + RepublicOriginBook.unemploymentExtra(in: state)
     }
 
     public static func apply(_ step: SeasonStep, to s: inout RepublicState) -> IntentResult {
