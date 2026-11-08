@@ -46,6 +46,8 @@ struct IslandView: View {
                 if layout.mapFirst {
                     HStack(alignment: .top, spacing: 8) {
                         status(in: layout)
+                            .frame(maxWidth: 560)
+                        Spacer(minLength: 0)
                         if layout.canUseTent {
                             Button {
                                 tentMode.toggle()
@@ -72,10 +74,10 @@ struct IslandView: View {
                     controls(in: layout)
                         .frame(width: layout.controls.width, height: layout.controls.height)
                         .background {
-                            if layout.mapFirst {
+                            if layout.mapFirst && detailOpen {
                                 UnevenRoundedRectangle(topLeadingRadius: 18, topTrailingRadius: 18)
                                     .fill(.regularMaterial)
-                            } else {
+                            } else if !layout.mapFirst {
                                 Rectangle().fill(.regularMaterial)
                             }
                         }
@@ -83,7 +85,7 @@ struct IslandView: View {
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .clipShape(RoundedRectangle(cornerRadius: 12))
+            .clipShape(Rectangle())
             .onAppear {
                 scene.scaleMode = .resizeFill
                 scene.setFraming(layout.framing)
@@ -162,7 +164,7 @@ struct IslandView: View {
                         .font(.caption.weight(.semibold))
                         .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(RepublicDockButton())
                 .accessibilityHint("Opens this decision without covering the map")
             }
             if let pending = game.state.pending {
@@ -224,7 +226,7 @@ struct IslandView: View {
                 scrolling
             }
             if layout.mapFirst {
-                mapDock()
+                mapDock(wide: layout.controls.width >= 540)
             } else {
                 dayClockControls
                     .padding(.horizontal, 8)
@@ -241,45 +243,59 @@ struct IslandView: View {
         .padding(.bottom, 8)
     }
 
-    private func mapDock() -> some View {
-        VStack(spacing: 6) {
-            HStack(spacing: 6) {
-                dockTool(.inspect)
-                Button {
-                    showCatalog.toggle()
-                    if showCatalog { tool = .inspect }
-                } label: {
-                    Label(showCatalog ? "Close build" : "Build", systemImage: "building.2.fill")
-                        .font(.caption.weight(.semibold))
-                        .frame(maxWidth: .infinity, minHeight: 44)
+    private func mapDock(wide: Bool) -> some View {
+        ViewThatFits(in: .horizontal) {
+            if wide {
+                HStack(spacing: 8) {
+                    dockTools
+                    Rectangle().fill(RepublicTheme.paper.opacity(0.15)).frame(width: 1, height: 24)
+                    clockTools
                 }
-                .buttonStyle(.borderedProminent)
-                .tint(showCatalog || tool.isBuilding ? .mint : .indigo)
-                .accessibilityLabel("Build")
-                dockTool(.road)
             }
-            HStack(spacing: 6) {
-                Menu {
-                    Button("Paused") { clock.setPace(.paused) }
-                    Button("Leisurely · 6 seconds") { clock.setPace(.playing(DayClockPolicy.leisurely)) }
-                    Button("Steady · 3.5 seconds") { clock.setPace(.playing(DayClockPolicy.steady)) }
-                    Button("Brisk · 2 seconds") { clock.setPace(.playing(DayClockPolicy.brisk)) }
-                } label: {
-                    Label(clock.policy.controlLabel, systemImage: clock.policy.tickInterval == nil ? "pause.fill" : "play.fill")
-                        .font(.caption.weight(.semibold))
-                        .frame(maxWidth: .infinity, minHeight: 44)
-                }
-                .buttonStyle(.bordered)
-                Button { game.advance() } label: {
-                    Label("Next Day", systemImage: "forward.fill")
-                        .font(.caption.weight(.semibold))
-                        .frame(maxWidth: .infinity, minHeight: 44)
-                }
-                .buttonStyle(.borderedProminent)
-                .disabled(game.state.blocksAdvance || game.saveIssue != nil)
+            VStack(spacing: 6) {
+                HStack(spacing: 6) { dockTools }
+                HStack(spacing: 6) { clockTools }
             }
         }
-        .padding(.horizontal, 8)
+        .padding(8)
+        .background(RepublicTheme.panel.opacity(0.97), in: RoundedRectangle(cornerRadius: 16))
+        .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(RepublicTheme.brass.opacity(0.25)))
+        .shadow(color: .black.opacity(0.25), radius: 12, y: 4)
+        .frame(maxWidth: 680)
+        .padding(.horizontal, 10)
+    }
+
+    @ViewBuilder private var dockTools: some View {
+        dockTool(.inspect)
+        Button {
+            showCatalog.toggle()
+            if showCatalog { tool = .inspect }
+        } label: {
+            Label("Build", systemImage: "hammer.fill")
+                .frame(maxWidth: .infinity, minHeight: 44)
+        }
+        .buttonStyle(RepublicDockButton(selected: showCatalog || tool.isBuilding))
+        .accessibilityLabel(showCatalog ? "Close build catalog" : "Open build catalog")
+        dockTool(.road)
+    }
+
+    @ViewBuilder private var clockTools: some View {
+        Menu {
+            Button("Paused") { clock.setPace(.paused) }
+            Button("Leisurely · 6 seconds") { clock.setPace(.playing(DayClockPolicy.leisurely)) }
+            Button("Steady · 3.5 seconds") { clock.setPace(.playing(DayClockPolicy.steady)) }
+            Button("Brisk · 2 seconds") { clock.setPace(.playing(DayClockPolicy.brisk)) }
+        } label: {
+            Label(clock.policy.controlLabel, systemImage: clock.policy.tickInterval == nil ? "pause.fill" : "play.fill")
+                .frame(maxWidth: .infinity, minHeight: 44)
+        }
+        .buttonStyle(RepublicDockButton())
+        Button { game.advance() } label: {
+            Label("Next Day", systemImage: "forward.end.fill")
+                .frame(maxWidth: .infinity, minHeight: 44)
+        }
+        .buttonStyle(RepublicDockButton(primary: true))
+        .disabled(game.state.blocksAdvance || game.saveIssue != nil)
     }
 
     private func dockTool(_ option: CityTool) -> some View {
@@ -289,12 +305,11 @@ struct IslandView: View {
             configureTapHandler()
         } label: {
             Label(option.label, systemImage: option.symbol)
-                .font(.caption.weight(.semibold))
                 .frame(maxWidth: .infinity, minHeight: 44)
         }
-        .buttonStyle(.borderedProminent)
-        .tint(tool == option ? .mint : .indigo)
+        .buttonStyle(RepublicDockButton(selected: tool == option))
         .accessibilityLabel("\(option.label) tool")
+        .accessibilityAddTraits(tool == option ? .isSelected : [])
     }
 
     private func sheetGrabber(_ layout: CityDisplayLayout) -> some View {
@@ -343,68 +358,92 @@ struct IslandView: View {
     }
 
     private func status(in layout: CityDisplayLayout) -> some View {
-        VStack(spacing: 5) {
-            HStack {
-                Text("Day \(game.snapshot.day) · \(game.snapshot.population) residents")
-                    .font(.caption.weight(.semibold))
-                Spacer(minLength: 0)
-            }
-            HStack(spacing: 5) {
-                metric(layout.mode == .singlePortrait ? "Cash" : "Treasury", "$\(game.snapshot.treasury)")
-                metric("Food", "\(game.snapshot.foodInStores)")
-                metric("Happy", "\(game.snapshot.meanHappiness)%")
-            }
-            if tool.isBuilding {
-                if let placementHint {
-                    Text(placementHint)
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.orange)
-                        .lineLimit(layout.scrollControls ? nil : 3)
+        VStack(alignment: .leading, spacing: 7) {
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 14) {
+                    dayPopulation
+                    resourceStrip
                 }
-            } else if let feedback = game.feedback {
-                Text(feedback).font(.caption).foregroundStyle(.orange)
-                    .lineLimit(layout.scrollControls ? nil : 2)
+                VStack(alignment: .leading, spacing: 7) {
+                    dayPopulation
+                    resourceStrip
+                }
             }
-            if let issue = game.saveIssue {
-                Text(issue).font(.caption).foregroundStyle(.red)
-                    .lineLimit(layout.scrollControls ? nil : 3)
-            }
-            if hungryResidents > 0 {
-                Text("\(hungryResidents) hungry. A market in range, or more food, is what they are missing.")
-                    .font(.caption2.weight(.semibold))
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            Button {
-                showCharter.toggle()
-            } label: {
-                Text(SeasonCopy.mapLine(game.state))
-                    .font(.caption2.weight(.semibold))
-                    .frame(maxWidth: .infinity, alignment: .leading)
+            Button { showCharter.toggle() } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "flag.fill").foregroundStyle(RepublicTheme.brass)
+                    Text(SeasonCopy.mapLine(game.state)).lineLimit(1)
+                    Spacer(minLength: 0)
+                    Image(systemName: "chevron.right").font(.caption2)
+                }
+                .font(.caption2.weight(.medium))
+                .frame(minHeight: 24)
+                .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .accessibilityHint("Shows or hides the charter card")
-            if let seasonBanner {
-                Text(seasonBanner)
-                    .font(.caption.weight(.bold))
-                    .foregroundStyle(Color(red: 0.45, green: 0.28, blue: 0.08))
-                    .frame(maxWidth: .infinity, alignment: .leading)
+            if let issue = game.saveIssue {
+                Text(issue).font(.caption).foregroundStyle(.red)
+            } else if let hint = tool.isBuilding ? placementHint : game.feedback {
+                Text(hint).font(.caption).foregroundStyle(RepublicTheme.brass).lineLimit(2)
+            } else if hungryResidents > 0 {
+                Label("\(hungryResidents) hungry · check market access and food", systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption2.weight(.semibold)).foregroundStyle(RepublicTheme.sand)
             }
-            Text(clock.policy.controlLabel)
-                .font(.caption2.weight(.semibold))
-                .foregroundStyle(.secondary)
-                .frame(maxWidth: .infinity, alignment: .leading)
+            if game.saveIssue == nil && game.feedback == nil && !tool.isBuilding && hungryResidents == 0 {
+                Text(developmentHint)
+                    .font(.caption2).foregroundStyle(RepublicTheme.paper.opacity(0.72))
+                    .lineLimit(2)
+            }
+            if let seasonBanner {
+                Text(seasonBanner).font(.caption.weight(.bold)).foregroundStyle(RepublicTheme.brass)
+            }
         }
-        .padding(6)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 10))
+        .foregroundStyle(RepublicTheme.paper)
+        .padding(.horizontal, 12).padding(.vertical, 9)
+        .background(RepublicTheme.panel.opacity(0.94), in: RoundedRectangle(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(RepublicTheme.brass.opacity(0.22)))
+        .shadow(color: .black.opacity(0.2), radius: 8, y: 3)
     }
 
-    private func metric(_ title: String, _ value: String) -> some View {
-        VStack(spacing: 2) {
-            Text(value).font(.caption.weight(.semibold))
-                .lineLimit(1).minimumScaleFactor(0.7)
-            Text(title).font(.caption2).foregroundStyle(.secondary)
+    private var developmentHint: String {
+        let jobless = game.state.citizens.filter { $0.alive && $0.work == nil }.count
+        if jobless > 0 {
+            let openings = game.state.buildings.filter { $0.isStanding(on: game.state.map) }
+                .reduce(0) { $0 + max(0, Int($1.kind.workerCapacity) - $1.workers.count) }
+            return openings > 0 ? "\(openings) open jobs · residents find work automatically"
+                : "\(jobless) seeking work · expand the local economy"
         }
-        .frame(maxWidth: .infinity)
+        let beds = game.state.buildings.filter { $0.kind == .house && $0.isStanding(on: game.state.map) }
+            .reduce(0) { $0 + max(0, Int($1.kind.housingCapacity) - $1.residents.count) }
+        return beds == 0 ? "Housing full · build homes for newcomers" : "\(beds) beds available · keep jobs and food ready"
+    }
+
+    private var dayPopulation: some View {
+        HStack(spacing: 8) {
+            Text("DAY \(game.snapshot.day)")
+                .font(.system(.caption, design: .rounded).weight(.bold))
+                .foregroundStyle(RepublicTheme.brass)
+            Label("\(game.snapshot.population)", systemImage: "person.2.fill")
+                .font(.caption.weight(.medium))
+                .accessibilityLabel("\(game.snapshot.population) residents")
+        }
+        .fixedSize()
+    }
+
+    private var resourceStrip: some View {
+        HStack(spacing: 14) {
+            resource("Treasury", "$\(game.snapshot.treasury)", icon: "banknote")
+            resource("Food stored", "\(game.snapshot.foodInStores)", icon: "leaf.fill")
+            resource("Happiness", "\(game.snapshot.meanHappiness)%", icon: "face.smiling")
+        }
+    }
+
+    private func resource(_ title: String, _ value: String, icon: String) -> some View {
+        Label(value, systemImage: icon)
+            .font(.caption.weight(.semibold)).monospacedDigit()
+            .lineLimit(1).fixedSize()
+            .accessibilityLabel("\(title): \(value)")
     }
 
     private var selectedAgenda: AgendaItem? {
@@ -603,7 +642,7 @@ struct IslandView: View {
                         .frame(maxWidth: .infinity, minHeight: 44)
                 }
                 .buttonStyle(.borderedProminent)
-                .tint(tool.isBuilding ? .mint : .indigo)
+                .tint(tool.isBuilding ? RepublicTheme.brass : RepublicTheme.panel)
                 .accessibilityLabel("Buildings tool")
             }
             .padding(4)
@@ -625,7 +664,7 @@ struct IslandView: View {
                         .frame(maxWidth: .infinity, minHeight: 44)
                 }
                 .buttonStyle(.borderedProminent)
-                .tint(tool.isBuilding ? .mint : .indigo)
+                .tint(tool.isBuilding ? RepublicTheme.brass : RepublicTheme.panel)
             }
             .padding(5)
             .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
@@ -649,7 +688,7 @@ struct IslandView: View {
                 .frame(maxWidth: .infinity, minHeight: 44)
         }
         .buttonStyle(.borderedProminent)
-        .tint(tool == option ? .mint : .indigo)
+        .tint(tool == option ? RepublicTheme.brass : RepublicTheme.panel)
         .accessibilityLabel("\(option.label) tool")
     }
 
@@ -663,7 +702,7 @@ struct IslandView: View {
                 .frame(minHeight: 44)
         }
         .buttonStyle(.borderedProminent)
-        .tint(tool == option ? .mint : .indigo)
+        .tint(tool == option ? RepublicTheme.brass : RepublicTheme.panel)
         .accessibilityLabel("\(option.label) tool")
     }
 
@@ -885,9 +924,18 @@ struct IslandView: View {
                         showCatalog = false
                         configureTapHandler()
                     } label: {
-                        Label(option.label, systemImage: option.symbol)
-                            .font(.caption.weight(.semibold))
-                            .frame(maxWidth: .infinity, minHeight: 44)
+                        VStack(spacing: 5) {
+                            if let kind = option.buildingKind {
+                                Image("building_\(String(describing: kind))")
+                                    .resizable().scaledToFit().frame(height: 46)
+                                    .accessibilityHidden(true)
+                                Text(option.label).font(.caption.weight(.semibold))
+                                Text("$\(kind.buildCost) · \(game.state.config.constructionDays(for: kind)) days")
+                                    .font(.caption2).foregroundStyle(.secondary)
+                            }
+                        }
+                        .padding(8)
+                        .frame(maxWidth: .infinity, minHeight: 88)
                     }
                     .buttonStyle(.bordered)
                 }
@@ -976,9 +1024,9 @@ private struct CityDisplayLayout {
             } else if cardOpen {
                 height = min(340, max(220, size.height * 0.40))
             } else if detailOpen {
-                height = min(210, max(180, size.height * 0.28))
+                height = size.width >= 540 ? 150 : 196
             } else {
-                height = min(148, max(120, size.height * 0.24))
+                height = size.width >= 540 ? 76 : 128
             }
             let panelHeight = min(size.height, max(0, height))
             focus = CGRect(x: 0, y: 0, width: size.width,
