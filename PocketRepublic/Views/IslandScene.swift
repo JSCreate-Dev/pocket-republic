@@ -32,6 +32,11 @@ final class IslandScene: SKScene {
     private var lastHint: String?
     private let tileTick = UISelectionFeedbackGenerator()
     var onPlacementHint: ((String?) -> Void)?
+    var onHoverTile: ((TileIndex?) -> Void)?
+    var onRoadTile: ((TileIndex) -> Void)?
+    var roadDrawing = false
+    private var roadPreview: [(tile: TileIndex, accepted: Bool)] = []
+    private var inspectEntrance: TileIndex?
     private var tileTextures: [String: SKTexture] = [:]
     private var visibleRect: TileRect?
     private var animationTime: TimeInterval = 0
@@ -143,6 +148,18 @@ final class IslandScene: SKScene {
         clampCameraToMap()
         refreshVisible(force: true)
         refreshPlacementGhost()
+        drawRoadPreview()
+        drawInspectReach()
+    }
+
+    func setRoadPreview(_ marks: [(tile: TileIndex, accepted: Bool)]) {
+        roadPreview = marks
+        if placementKind == nil { drawRoadPreview() }
+    }
+
+    func showInspectReach(from entrance: TileIndex?) {
+        inspectEntrance = entrance
+        if placementKind == nil { drawInspectReach() }
     }
 
     /// Building tool for the placement ghost. `fallbackHover` is used only until
@@ -830,6 +847,7 @@ final class IslandScene: SKScene {
             tileTick.selectionChanged()
             tileTick.prepare()
         }
+        onHoverTile?(next)
         refreshPlacementGhost()
     }
 
@@ -988,6 +1006,11 @@ final class IslandScene: SKScene {
                 refreshVisible()
             }
             wasDragged = true
+        } else if let touch = touches.first, roadDrawing {
+            wasDragged = true
+            if let state = renderedState, let tile = tile(at: touch.location(in: self), in: state.map) {
+                onRoadTile?(tile)
+            }
         } else if let touch = touches.first {
             let p = touch.location(in: self), previous = touch.previousLocation(in: self)
             cameraNode.position.x -= p.x - previous.x
@@ -1004,9 +1027,54 @@ final class IslandScene: SKScene {
 
     override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
         defer { touchStart = nil }
+        if roadDrawing {
+            if !wasDragged, let state = renderedState, let touch = touches.first,
+               let tile = tile(at: touch.location(in: self), in: state.map) {
+                onRoadTile?(tile)
+            }
+            return
+        }
         guard !wasDragged, let state = renderedState, let touch = touches.first,
               let tile = tile(at: touch.location(in: self), in: state.map) else { return }
         onTileTap?(tile)
+    }
+
+    private func drawRoadPreview() {
+        guard placementKind == nil, let map = renderedState?.map else { return }
+        ghostLayer.removeAllChildren()
+        guard !roadPreview.isEmpty else { return }
+        let markerSize = CGSize(width: halfWidth * 2, height: halfHeight * 2)
+        let markerTexture = BuildingArtwork.tileMarkerTexture(size: markerSize)
+        for mark in roadPreview {
+            let node = SKSpriteNode(texture: markerTexture, size: markerSize)
+            node.color = mark.accepted
+                ? UIColor(red: 0.25, green: 0.55, blue: 0.95, alpha: 1)
+                : UIColor(red: 0.90, green: 0.22, blue: 0.20, alpha: 1)
+            node.colorBlendFactor = 0.9
+            node.alpha = 0.55
+            node.position = point(for: mark.tile, in: map)
+            ghostLayer.addChild(node)
+        }
+    }
+
+    private func drawInspectReach() {
+        guard placementKind == nil, let entrance = inspectEntrance, let state = renderedState else {
+            if placementKind == nil { reachLayer.removeAllChildren() }
+            return
+        }
+        reachLayer.removeAllChildren()
+        let map = state.map
+        let markerSize = CGSize(width: halfWidth * 2, height: halfHeight * 2)
+        let markerTexture = BuildingArtwork.tileMarkerTexture(size: markerSize)
+        let reach = ServiceReach.tiles(from: entrance, maxDistance: state.config.maxServiceDistance, on: map)
+        for tile in reach {
+            let node = SKSpriteNode(texture: markerTexture, size: markerSize)
+            node.color = UIColor(red: 0.98, green: 0.78, blue: 0.22, alpha: 1)
+            node.colorBlendFactor = 1
+            node.alpha = 0.30
+            node.position = point(for: tile, in: map)
+            reachLayer.addChild(node)
+        }
     }
 }
 
