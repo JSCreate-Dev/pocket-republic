@@ -6,6 +6,7 @@ import PocketRepublicCore
 /// Screen-space controls use the local scene geometry and Apple's reserved regions.
 /// The SpriteKit world stays behind them and is never part of the saved simulation.
 struct IslandView: View {
+    var islandVisible: Bool
     @EnvironmentObject private var game: Game
     @EnvironmentObject private var clock: DayClock
     @Environment(\.verticalSizeClass) private var verticalSizeClass
@@ -117,11 +118,17 @@ struct IslandView: View {
             }
             if !newTool.isBuilding { placeTile = nil }
             if newTool != .inspect { showCatalog = false }
-            clock.setModal("build", presented: newTool != .inspect)
+            clock.setModal(IslandSessionHold.buildToken, presented: newTool != .inspect)
             configureTapHandler()
         }
         .onChange(of: showCatalog) { _, shown in
-            clock.setModal("catalog", presented: shown)
+            clock.setModal(IslandSessionHold.catalogToken, presented: shown)
+        }
+        .onChange(of: islandVisible) { _, visible in
+            if !visible { leaveBuildSession() }
+        }
+        .onDisappear {
+            if !islandVisible { leaveBuildSession() }
         }
         .onChange(of: selectedBuildingID) { _, id in
             scene.setSelection(id)
@@ -720,6 +727,29 @@ struct IslandView: View {
         }
     }
 
+    /// Drops the build and catalog clock holds. A demolish confirm and Start New City
+    /// keep their own tokens. The scene object, and therefore the camera, stays.
+    private func leaveBuildSession() {
+        var hold = IslandSessionHold(
+            toolIsInspect: tool == .inspect,
+            catalogOpen: showCatalog,
+            roadDraftCount: roadDraft.count,
+            hasPlacement: placeTile != nil,
+            modalTokens: [IslandSessionHold.buildToken, IslandSessionHold.catalogToken])
+        hold.leaveIsland()
+        showCatalog = hold.catalogOpen
+        roadDraft = []
+        placeTile = nil
+        scene.setRoadPreview([])
+        scene.hidePlacementGhost()
+        if tool != .inspect {
+            tool = .inspect
+        } else {
+            scene.roadDrawing = false
+            scene.setPlacementKind(nil, fallbackHover: nil)
+        }
+    }
+
     private var cardOpen: Bool {
         showCharter || showCatalog || selectedAgenda != nil || game.state.pending != nil || buildingInspection != nil
     }
@@ -811,7 +841,7 @@ struct IslandView: View {
         let fresh = roadMarks.filter { $0.accepted && !game.state.map.isRoad(at: $0.tile) }.count
         let blocked = roadMarks.contains { !$0.accepted }
         return VStack(alignment: .leading, spacing: 6) {
-            Text(fresh > 0 ? "Pave \(fresh) · $\(fresh * 10)" : "Drag a road. Two fingers move the map.")
+            Text(fresh > 0 ? "Pave \(fresh) · $\(fresh * 10)" : "Drag a road. Two fingers pan and pinch.")
                 .font(.caption.weight(.semibold))
             if blocked {
                 Text("A red tile fails the road rule or the treasury. Pave stops there.")

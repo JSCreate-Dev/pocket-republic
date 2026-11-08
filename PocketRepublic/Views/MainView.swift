@@ -33,7 +33,7 @@ struct MainView: View {
 
     private var island: some View {
         NavigationStack {
-            IslandView()
+            IslandView(islandVisible: tab == 0)
                 .navigationTitle("Pocket Republic")
                 .navigationBarTitleDisplayMode(.inline)
         }

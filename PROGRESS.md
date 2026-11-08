@@ -82,7 +82,7 @@ Phone and a wide flat window (the iPad case that used to split 50/50) keep the m
 
 Build opens a catalog grouped as Homes, Food, Work, and Services. Choosing one shows the existing footprint ghost, the price, and `validatePlacement`'s reason. Place sends `placeBuilding`. Cancel leaves the map. Services draw `ServiceReach` from `maxServiceDistance`. A finished service building draws that same reach; a site does not pretend it is open.
 
-Road is a mode. One finger adds up to 24 tiles. Two fingers still pan and pinch, so a pan does not pave. Pave sends `buildRoad` in order at $10 a tile and stops on the first rejection. The core is still one tile at a time.
+Road is a mode. One finger adds up to 24 tiles. Two fingers pan and pinch together: the midpoint follows the same camera delta as one finger, then the pinch stays on that midpoint. A second finger latches the gesture so lifting one finger does not add a road tile. Pave sends `buildRoad` in order at $10 a tile and stops on the first rejection. The core is still one tile at a time. Leaving the Island tab returns the tool to Inspect, clears the draft and the ghost, and releases only the build and catalog clock holds.
 
 The charter is one line on the HUD (tap it for the card). Hungry residents, when the districts report any, are named from `hungryCount`. An election or other crisis still opens on the island and blocks the day. An island event or origin dilemma is a button, not a card that covers the map. The live clock still pauses while that event is waiting, while a crisis blocks, and while Build, Road, or the catalog is up. People, Govern, and the Gazette stay tabs. Start New City is unchanged.
 
