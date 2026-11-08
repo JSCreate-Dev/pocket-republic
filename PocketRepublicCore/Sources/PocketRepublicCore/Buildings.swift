@@ -153,8 +153,22 @@ public struct Building: Codable, Sendable, Identifiable {
     /// A site on the ground that is not finished yet. It owns its tiles and has been
     /// paid for, but has no workers, residents, production, upkeep, or service reach.
     public var isUnderConstruction: Bool { daysRequired > 0 && daysConstructed < daysRequired }
-    /// The one gate every simulation step checks before touching a building.
+    /// Construction is finished. Demolition does not clear this: the record stays
+    /// so ids remain dense. Jobs, upkeep, production, and service range use
+    /// `isStanding(on:)`, which also requires the door to still be this building's.
     public var isOperational: Bool { !isUnderConstruction }
+
+    /// True when this record still owns its door. Demolition clears `buildingAt`
+    /// and leaves the struct in place, so a ghost fails this check.
+    public func occupiesGround(on map: WorldMap) -> Bool {
+        guard entrance.raw >= 0, Int(entrance.raw) < map.tileCount else { return false }
+        return map.buildingAt(entrance) == id
+    }
+
+    /// Open for work: construction finished and the door is still on the map.
+    public func isStanding(on map: WorldMap) -> Bool {
+        isOperational && occupiesGround(on: map)
+    }
 
     /// Derived for the renderer and inspect panel, never stored: a `Double` in
     /// `RepublicState` would make `stateHash()` non-canonical.

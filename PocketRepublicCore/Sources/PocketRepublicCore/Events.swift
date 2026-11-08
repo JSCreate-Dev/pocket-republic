@@ -24,6 +24,10 @@ public enum EventKind: String, Codable, Sendable {
     case decreeIssued
     case electionCalled
     case electionHeld
+    /// A random island event was raised or answered. The first cause's detail is
+    /// the headline (and, once answered, the choice), which is what the Events
+    /// list already prints.
+    case islandEvent
 }
 
 /// Where an event happened. Required for anything district-scoped: "unrest rose" is
@@ -44,6 +48,8 @@ public enum CauseKind: String, Codable, Sendable {
     case noMarketAccess, noClinicAccess, noPoliceAccess
     case foodShortage, unemployment, taxBurden, corruption
     case treasuryDeficit, districtNeglect, poverty, policyChange
+    /// An island-event card. `detail` is flavor, a headline, or the choice taken.
+    case islandEvent
 }
 
 /// One contributing factor with the actual number behind it, so a crisis can be

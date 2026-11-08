@@ -162,7 +162,7 @@ public enum WorldGenerator {
     }
 
     static func freeHouse(_ s: inout RepublicState) -> BuildingID? {
-        for b in s.buildings where b.kind == .house && b.isOperational
+        for b in s.buildings where b.kind == .house && b.isStanding(on: s.map)
             && Int32(b.residents.count) < b.kind.housingCapacity {
             return b.id
         }

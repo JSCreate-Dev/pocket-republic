@@ -28,11 +28,18 @@ public struct BalanceConfig: Codable, Sendable, Equatable {
     // Logistics
     public var marketSpoilagePercent: Int32 = 5
     public var farmToMarketShipPerDay: Int32 = 40
-    /// Road-distance reach of a service building. Districts are ~21 tiles across,
-    /// so anything under ~20 leaves a quarter of a district permanently unservable
-    /// no matter what the player does. Tune down only alongside denser service
-    /// placement, or coverage stops being a decision and becomes a dead zone.
-    public var maxServiceDistance: UInt16 = 20
+    /// Road-distance reach of a service building. Districts are ~21 tiles across.
+    /// Multi-tile footprints block every tile but the entrance, which makes the
+    /// road walk one step longer than when a building was a single passable tile.
+    /// 21 puts a door that walks 21 tiles on the cap. 22 is still out of range,
+    /// so a market placed on the wrong side of the island does not cover it.
+    public var maxServiceDistance: UInt16 = 21
+
+    /// Nil keeps `EventPacing.standard` and is omitted from the save, so a city
+    /// written before the event deck still decodes and still matches its checksum.
+    public var eventPacing: EventPacing? = nil
+
+    public var activeEventPacing: EventPacing { eventPacing ?? .standard }
 
     // Wellbeing
     public var hungerHappinessPenalty: Int32 = 9
@@ -122,4 +129,47 @@ public struct BalanceConfig: Codable, Sendable, Equatable {
     }
 
     public init() {}
+}
+
+/// Knobs for the island-event deck. Stored only when a city overrides
+/// `EventPacing.standard`, so an untouched config encodes exactly as before.
+public struct EventPacing: Codable, Sendable, Equatable {
+    /// Percent chance, rolled once per advanced day, that an event is offered.
+    public var chancePercent: Int32
+    /// Days after an event is raised before another may be raised.
+    public var quietDays: Int32
+    /// Advances kept quiet after a crisis is resolved.
+    public var postCrisisQuietDays: Int32
+    /// An event id cannot be drawn again until this many days have passed.
+    public var repeatDays: Int32
+    /// How many of the most recent event ids are kept out of the draw.
+    public var recentExclusion: Int32
+    /// Applied to good and weird weights when the last two events were both bad.
+    public var toneBalanceMultiplier: Int32
+    /// The card stays through `raisedOnDay + expiryDays`, then the ignore option applies.
+    public var expiryDays: Int32
+
+    public init(chancePercent: Int32, quietDays: Int32, postCrisisQuietDays: Int32,
+                repeatDays: Int32, recentExclusion: Int32, toneBalanceMultiplier: Int32,
+                expiryDays: Int32) {
+        self.chancePercent = chancePercent
+        self.quietDays = quietDays
+        self.postCrisisQuietDays = postCrisisQuietDays
+        self.repeatDays = repeatDays
+        self.recentExclusion = recentExclusion
+        self.toneBalanceMultiplier = toneBalanceMultiplier
+        self.expiryDays = expiryDays
+    }
+
+    /// Design section 5.1, trimmed to this deck: about one offer a week, a short
+    /// quiet period, and no immediate repeat.
+    public static let standard = EventPacing(
+        chancePercent: 12,
+        quietDays: 4,
+        postCrisisQuietDays: 2,
+        repeatDays: 30,
+        recentExclusion: 3,
+        toneBalanceMultiplier: 2,
+        expiryDays: 3
+    )
 }

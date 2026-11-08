@@ -20,6 +20,9 @@ public enum AgendaGenerator {
         if s.pending == nil && !s.agenda.contains(where: { $0.tier == .crisis }) {
             topUp(&s)
         }
+        // One draw per advanced day, including the day an election is called.
+        // A pending crisis never reaches this function: `advance` returns first.
+        IslandEvents.update(&s)
     }
 
     // MARK: - Expiry
@@ -33,6 +36,10 @@ public enum AgendaGenerator {
                 continue
             }
             // Letting a demand lapse is a real, remembered cost -- but never fatal.
+            if item.islandEventID != nil {
+                IslandEvents.lapse(&s, item)
+                continue
+            }
             if item.ignoreCost > 0, let f = item.faction {
                 let i = Int(f.rawValue)
                 s.factions[i].adjust(-item.ignoreCost, on: s.day,
@@ -140,7 +147,7 @@ public enum AgendaGenerator {
                 dole.districtUnrest = -8
                 options = [AgendaOption(id: 0, label: "Open a relief fund", effect: dole),
                            AgendaOption(id: 1, label: "Refuse the dole", effect: refuse(f.kind))]
-            case .treasuryDeficit, .policyChange:
+            case .treasuryDeficit, .policyChange, .islandEvent:
                 continue
             }
 

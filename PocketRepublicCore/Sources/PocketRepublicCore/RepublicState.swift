@@ -51,6 +51,10 @@ public struct RepublicState: Codable, Sendable {
     /// this is never empty after a tick.
     public var agenda: [AgendaItem] = []
     public var lastElectionDay: Int32 = -9999
+    /// Nil until the first advanced day asks the event deck to roll. A save from
+    /// before the deck has no key here; decoding leaves it nil and the checksum,
+    /// which re-encodes the state, still matches.
+    public var islandEventLog: IslandEventLog?
 
     /// A day-advance is blocked only by genuine crises, not by the standing agenda.
     public var blocksAdvance: Bool {
@@ -159,6 +163,39 @@ extension RepublicState {
         guard lost > 0 else { return }
         buildings[Int(id.raw)].foodStore -= lost
         ledger.foodSpoiled += Int64(lost)
+    }
+
+    /// Ship up to `requested` food off the island, markets first and the named
+    /// building first of all. Returns how many units actually left. Farms are
+    /// not raided: a trade offer buys what is already on the stall.
+    @discardableResult
+    mutating func exportFood(upTo requested: Int32, preferring location: EventLocation) -> Int32 {
+        guard requested > 0 else { return 0 }
+        var order: [Int] = []
+        func consider(_ index: Int) {
+            guard index >= 0, index < buildings.count, !order.contains(index) else { return }
+            let building = buildings[index]
+            guard building.kind == .market, building.isStanding(on: map), building.foodStore > 0 else { return }
+            order.append(index)
+        }
+        if let id = location.building { consider(Int(id.raw)) }
+        if let district = location.district {
+            for index in buildings.indices where buildings[index].district == district { consider(index) }
+        }
+        for index in buildings.indices { consider(index) }
+
+        var left = requested
+        var shipped: Int32 = 0
+        for index in order {
+            let take = min(left, buildings[index].foodStore)
+            guard take > 0 else { continue }
+            buildings[index].foodStore -= take
+            left -= take
+            shipped += take
+            if left == 0 { break }
+        }
+        if shipped > 0 { ledger.foodExported += Int64(shipped) }
+        return shipped
     }
 
     /// Debug-only invariant. Tests assert this never trips.
