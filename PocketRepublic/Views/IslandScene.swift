@@ -1533,10 +1533,11 @@ final class IslandScene: SKScene {
                     return
                 }
                 let signs = attentionNodes.map { id, node -> (BuildingID, CGFloat) in
-                    let point = node.convert(.zero, to: cameraNode)
+                    let point = node.convert(CGPoint.zero, to: cameraNode)
                     return (id, hypot(point.x - screen.x, point.y - screen.y))
                 }
-                if let sign = signs.filter({ $0.1 <= 22 }).min(by: { $0.1 == $1.1 ? $0.0 < $1.0 : $0.1 < $1.1 }) {
+                let nearbySigns = signs.filter { $0.1 <= 22 }
+                if let sign = nearbySigns.min(by: { $0.1 == $1.1 ? $0.0 < $1.0 : $0.1 < $1.1 }) {
                     tileTick.selectionChanged()
                     onTileTap?(state.buildings[Int(sign.0.raw)].tile)
                     return
