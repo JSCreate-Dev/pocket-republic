@@ -1,13 +1,15 @@
 import SwiftUI
 import PocketRepublicCore
 
-/// Decree cards built from `DecreeSpec` and the live agenda. `DecreeSpec` has no
-/// flavor string yet, so the card leaves that line out instead of inventing one.
+/// Standing decree cards explain actual simulation effects and availability.
 /// "Not now" only closes the card. It does not send the agenda's dismiss option,
-/// which would remove the offer and record a decree.
+/// which would remove the council offer.
 struct DecreeBoard: View {
     @EnvironmentObject private var game: Game
     @State private var openDecree: String?
+    @State private var confirmDecree: DecreeCardReading?
+    @State private var decreeReceipt: String?
+    @State private var decreeError: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: RepublicTheme.Space.lg) {
@@ -15,6 +17,17 @@ struct DecreeBoard: View {
             tax
             decrees
             council
+        }
+        .foregroundStyle(RepublicTheme.ink)
+        .confirmationDialog("Issue this decree?", isPresented: Binding(
+            get: { confirmDecree != nil }, set: { if !$0 { confirmDecree = nil } }
+        ), titleVisibility: .visible) {
+            if let card = confirmDecree {
+                Button("Issue · \(card.costLabel)") { issue(card) }
+                Button("Cancel", role: .cancel) { confirmDecree = nil }
+            }
+        } message: {
+            if let card = confirmDecree { Text("\(card.purpose)\n\(card.duration)\n\(card.caution)") }
         }
     }
 
@@ -49,13 +62,15 @@ struct DecreeBoard: View {
                 next.incomeTaxPercent = Int32(newValue)
                 game.send(.setPolicy(next))
             }
-        ), in: 0...60, step: 5) {
+        ), in: 0...80, step: 5) {
             VStack(alignment: .leading, spacing: 2) {
                 Text("Income tax")
                     .font(RepublicTheme.heading(.headline))
                 Text("\(game.state.policy.incomeTaxPercent)%")
                     .font(RepublicTheme.body(.title3))
                     .foregroundStyle(RepublicTheme.turquoise)
+                Text("A lasting rate on taxable income. Higher tax raises revenue but can hurt residents' wellbeing.")
+                    .font(RepublicTheme.body(.caption)).foregroundStyle(RepublicTheme.inkSoft)
             }
         }
         .dioramaCard()
@@ -66,6 +81,23 @@ struct DecreeBoard: View {
         VStack(alignment: .leading, spacing: RepublicTheme.Space.sm) {
             Text("Decrees")
                 .font(RepublicTheme.heading(.title3))
+            Text("Your standing powers: spend once for immediate measures, or change a lasting policy. Faction approval is political support, not an instant happiness bonus. Each decree has a \(game.state.config.effectiveDecreeCooldownDays)-day cooldown.")
+                .font(RepublicTheme.body(.subheadline)).foregroundStyle(RepublicTheme.inkSoft)
+            Text("▲ gains faction approval · ▼ loses approval · more arrows mean a larger change.")
+                .font(RepublicTheme.body(.caption)).foregroundStyle(RepublicTheme.inkSoft)
+            if let error = decreeError {
+                Label(error, systemImage: "exclamationmark.triangle")
+                    .font(RepublicTheme.body(.subheadline)).foregroundStyle(RepublicTheme.alert)
+            }
+            if let receipt = decreeReceipt {
+                HStack(alignment: .top) {
+                    Label(receipt, systemImage: "checkmark.seal.fill")
+                    Spacer(minLength: 8)
+                    Button { decreeReceipt = nil } label: { Image(systemName: "xmark").frame(width: 44, height: 44) }
+                        .accessibilityLabel("Dismiss decree receipt")
+                }
+                .font(RepublicTheme.body(.subheadline)).dioramaCard(fill: RepublicTheme.grass.opacity(0.15))
+            }
             ForEach(DecreeCatalogue.all, id: \.name) { spec in
                 decreeRow(spec)
             }
@@ -102,6 +134,12 @@ struct DecreeBoard: View {
                             .font(RepublicTheme.heading(.headline))
                             .multilineTextAlignment(.leading)
                             .fixedSize(horizontal: false, vertical: true)
+                        Text(card.purpose)
+                            .font(RepublicTheme.body(.caption)).foregroundStyle(RepublicTheme.inkSoft)
+                            .multilineTextAlignment(.leading).fixedSize(horizontal: false, vertical: true)
+                        Text(card.availability ?? "Ready to issue")
+                            .font(RepublicTheme.body(.caption).weight(.semibold))
+                            .foregroundStyle(card.canIssue ? RepublicTheme.fertile : RepublicTheme.inkSoft)
                         if let summary = card.chipSummary {
                             Text(summary)
                                 .font(RepublicTheme.body(.caption))
@@ -129,6 +167,13 @@ struct DecreeBoard: View {
 
     private func decreeDetail(_ card: DecreeCardReading) -> some View {
         VStack(alignment: .leading, spacing: RepublicTheme.Space.sm) {
+            Label(card.duration, systemImage: "clock")
+                .font(RepublicTheme.body(.subheadline).weight(.semibold))
+            Text(card.caution).font(RepublicTheme.body(.subheadline)).foregroundStyle(RepublicTheme.inkSoft)
+            if let reason = card.availability {
+                Text(reason).font(RepublicTheme.body(.subheadline)).foregroundStyle(RepublicTheme.alert)
+            }
+            Text("Exact effects").font(RepublicTheme.heading(.subheadline))
             if let shortfall = card.shortfall {
                 Text("Need \(shortfall) more")
                     .font(RepublicTheme.body(.caption).weight(.semibold))
@@ -149,9 +194,9 @@ struct DecreeBoard: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
             Button {
-                issue(card)
+                confirmDecree = card
             } label: {
-                Text("Issue decree")
+                Text("Issue · \(card.costLabel)")
                     .frame(maxWidth: .infinity, minHeight: 44)
             }
             .buttonStyle(.borderedProminent)
@@ -164,9 +209,22 @@ struct DecreeBoard: View {
     }
 
     private func issue(_ card: DecreeCardReading) {
-        guard let id = card.agendaID, let option = card.enactOption else { return }
-        game.send(.resolveAgendaItem(id, option: option))
-        openDecree = nil
+        guard let spec = DecreeCatalogue.all.first(where: { $0.name == card.title }) else { return }
+        let current = DecreeCardReading.make(spec: spec, state: game.state)
+        guard current.canIssue else {
+            decreeError = current.availability ?? "This decree can no longer be issued."
+            confirmDecree = nil
+            return
+        }
+        let day = game.state.day
+        if game.send(.issueDecree(card.title)) {
+            decreeError = nil
+            decreeReceipt = "\(card.title) issued on Day \(day) · \(card.costLabel). \(card.duration)"
+            openDecree = card.title
+        } else {
+            decreeError = game.saveIssue ?? game.feedback ?? "Could not issue the decree."
+        }
+        confirmDecree = nil
     }
 
     private func councilCard(_ item: AgendaItem) -> some View {
@@ -194,37 +252,70 @@ struct DecreeCardReading: Identifiable {
     }
 
     var title: String
+    var purpose: String
+    var duration: String
+    var caution: String
+    var availability: String?
     var costLabel: String
     var shortfall: Int64?
     var canAfford: Bool
     var chips: [Chip]
     var effects: [String]
-    var agendaID: DecisionID?
-    var enactOption: Int32?
     var id: String { title }
-    var canIssue: Bool { canAfford && agendaID != nil && enactOption != nil }
+    var canIssue: Bool { canAfford && availability == nil }
     var chipSummary: String? {
         let shown = chips.prefix(2).map(\.label)
         return shown.isEmpty ? nil : shown.joined(separator: " · ")
     }
 
     static func make(spec: DecreeSpec, state: RepublicState) -> DecreeCardReading {
-        let pay = spec.cost > 0 ? spec.cost : spec.effect.treasuryCost
+        let pay = max(spec.cost, spec.effect.treasuryCost)
         let shortfall: Int64? = pay > state.treasury ? pay - state.treasury : nil
-        let offer = state.agenda.first { item in
-            item.kind == .decree && item.causes.contains { $0.detail == spec.name }
-        }
-        let enact = offer?.options.first { $0.id == 0 } ?? offer?.options.first
+        let info = guide(spec, state: state)
         return DecreeCardReading(
             title: spec.name,
+            purpose: info.purpose,
+            duration: info.duration,
+            caution: info.caution,
+            availability: DecreeCatalogue.unavailableReason(for: spec, in: state),
             costLabel: pay == 0 ? "Free" : "$\(pay)",
             shortfall: shortfall,
             canAfford: shortfall == nil,
             chips: chips(factions: spec.effect.favorFactions, deltas: spec.effect.favorDeltas),
-            effects: AgendaEffectCopy.lines(spec.effect),
-            agendaID: offer?.id,
-            enactOption: enact?.id
+            effects: AgendaEffectCopy.lines(spec.effect).map { $0 == "Clears neglect in the district" ? "Clears neglect in every district" : $0 }
         )
+    }
+
+    private static func guide(_ spec: DecreeSpec, state: RepublicState) -> (purpose: String, duration: String, caution: String) {
+        let e = spec.effect
+        if e.foodImport > 0 {
+            return ("Buy \(e.foodImport) food for an open market.", "One-time stock delivery; no automatic refill.",
+                    "Residents still need a reachable market and money to buy food. This does not create a permanent ration system.")
+        }
+        if e.civicWageDelta != 0 {
+            return ("Raise the daily wage of civic workers.", "Lasting policy: $\(state.policy.civicWage) → $\(max(0, state.policy.civicWage + e.civicWageDelta)) per civic worker/day.",
+                    "No upfront charge, but future civic payroll increases when workers are paid. Ensure the treasury can sustain it.")
+        }
+        if e.incomeTaxDelta != 0 {
+            let next = max(0, min(80, state.policy.incomeTaxPercent + e.incomeTaxDelta))
+            return (e.incomeTaxDelta < 0 ? "Reduce the income-tax burden." : "Raise income tax for future collections.",
+                    "Lasting rate: \(state.policy.incomeTaxPercent)% → \(next)%. No automatic expiry.",
+                    "The rate stays until changed again. Tax relief can reduce revenue; higher taxes can harm wellbeing. Faction effects apply immediately.")
+        }
+        if e.districtNeglectReset {
+            return ("Clear accumulated neglect and ease district unrest.", "One-time action across all districts.",
+                    "This does not place buildings or fund an ongoing construction program. Neglect can build up again.")
+        }
+        if e.corruption < 0 {
+            return ("Reduce corruption and strengthen legitimacy.", "One-time political and government-meter changes.",
+                    "Officials lose approval. This does not permanently stop future corruption.")
+        }
+        if e.legitimacy < 0 {
+            return ("Suppress unrest across the island.", "One-time unrest and political changes.",
+                    "Legitimacy falls and corruption rises. This currently changes unrest, not citizen movement or a timed night restriction.")
+        }
+        return ("Ease unrest with a public celebration.", "One-time unrest and faction-approval changes.",
+                "This is not a recurring festival and does not directly refill markets or raise every citizen's happiness.")
     }
 
     private static func chips(factions: [FactionKind], deltas: [Int32]) -> [Chip] {

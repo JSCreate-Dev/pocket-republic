@@ -109,6 +109,28 @@ public struct DailyRoutine: Equatable, Sendable {
     public var legPaths: [[TileIndex]]
     public var path: [TileIndex]
 
+    public enum Activity: Equatable, Sendable {
+        case staying(Stop)
+        case traveling(to: Stop)
+    }
+
+    /// Exact planned activity for the same half-open dwell/travel intervals
+    /// consumed by the map renderer. Reading it never advances simulation time.
+    public func activity(atHour hour: Double) -> Activity? {
+        guard hour.isFinite, hour >= 0, hour < 24 else { return nil }
+        for index in stops.indices where index < dwellStart.count && index < dwellEnd.count {
+            if hour >= Double(dwellStart[index]), hour < Double(dwellEnd[index]) {
+                return .staying(stops[index])
+            }
+            if index + 1 < stops.count, index + 1 < dwellStart.count,
+               index < legPaths.count, legPaths[index].count > 1,
+               hour >= Double(dwellEnd[index]), hour < Double(dwellStart[index + 1]) {
+                return .traveling(to: stops[index + 1])
+            }
+        }
+        return nil
+    }
+
     public func tile(atHour hour: Int) -> TileIndex {
         let h = min(23, max(0, hour))
         guard let fallback = entrances.first ?? path.first else { return TileIndex(0) }

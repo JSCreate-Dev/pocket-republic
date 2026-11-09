@@ -1,0 +1,9 @@
+# Founding tour, journal and living-workshop presentation
+
+2026-11-08 23:03 EST. Role Ios Dev. Branch ui/founding-tour-and-journal; depends on first-minute feedback core atop exact Art and Living World source.
+
+Skippable three-beat camera/caption tour, fresh day-zero islands once per seed, global opt-out and optional replay. At most 7.5s automatic; explicit Continue can shorten it. VoiceOver avoids automatic timed presentation and manual replay advances explicitly. Reduce Motion removes camera motion, smoke, completion ripple and decorative construction pops/dust/crew. Prefs are local UI UserDefaults, not game-state fields. All exits release only the tour hold and restore the prior camera/pace; background, new seed, blocking decision and storage errors cancel. Captions scroll for large text and use the control pane on physical division layouts.
+
+Journal uses actual reader goals/results, up to six session summaries, net changes inclusive of player orders and existing Gazette for persisted history. Goal actions wait for sheet dismissal and revalidate current state. New-island reset clears stale build/road sessions and queued old actions. Workshop smoke is one low-rate emitter per visible staffed completed workshop (cosmetic, no production/pollution claim). A finite completion ring complements existing opening feedback; diagnostics hide new decorative effects.
+
+Verified: 174 passing core tests in 8.192s; actual extracted tour policy compile/harness; all app syntax; real decree-model, timer and lighting harnesses; 27 building and 63 material checks; whitespace. All new app code is in existing source files, no project references. No Xcode/UIKit/SpriteKit typecheck or device rendering/performance test available. See docs/reviews/2026-11-08-player-loop.md for coverage and limits.

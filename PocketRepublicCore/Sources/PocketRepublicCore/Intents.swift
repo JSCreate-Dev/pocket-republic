@@ -11,6 +11,7 @@ public enum PlayerIntent: Sendable, Equatable {
     /// placement commission already applies. It does not move money or food.
     case setOperatingMode(BuildingID, OperatingMode)
     case setPolicy(Policy)
+    case issueDecree(String)
     case resolveDecision(DecisionID, option: Int32)
     /// Answer anything on the standing agenda: a faction demand, an advisory, a
     /// decree, a placement commission or an election.
@@ -26,6 +27,7 @@ public enum IntentRejection: String, Sendable, Equatable {
     case insufficientTreasury, noSuchBuilding, cannotDemolishTownHall
     case noPendingDecision, decisionMismatch, invalidOption
     case noSuchAgendaItem
+    case decreeUnavailable, decreeCoolingDown
     case crisisPendingBlocksBuilding
     case operatingModeNotOffered
     case seasonNotReady
@@ -121,6 +123,9 @@ extension SimulationEngine {
             s.buildings[Int(id.raw)].mode = mode
             return .accepted
 
+        case .issueDecree(let name):
+            return enactStandingDecree(name, in: &s)
+
         case .setPolicy(let p):
             s.policy = p
             s.emit(.dayAdvanced, causes: [CauseFactor(.policyChange, value: p.incomeTaxPercent,
@@ -135,6 +140,12 @@ extension SimulationEngine {
             guard let choice = item.options.first(where: { $0.id == option }) else {
                 return .rejected(.invalidOption)
             }
+            if item.kind == .decree, choice.id == 0 {
+                guard let name = item.causes.first(where: { cause in
+                    DecreeCatalogue.all.contains { $0.name == cause.detail }
+                })?.detail else { return .rejected(.decreeUnavailable) }
+                return enactStandingDecree(name, in: &s)
+            }
             guard s.treasury >= choice.effect.treasuryCost else {
                 return .rejected(.insufficientTreasury)
             }
@@ -147,7 +158,7 @@ extension SimulationEngine {
             if item.islandEventID != nil {
                 IslandEvents.recordOutcome(&s, item: item, option: choice)
             } else {
-                s.emit(item.kind == .decree ? .decreeIssued : .agendaItemResolved,
+                s.emit(.agendaItemResolved,
                        location: item.location, causes: item.causes, magnitude: option)
             }
             return .accepted

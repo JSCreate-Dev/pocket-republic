@@ -119,9 +119,10 @@ extension RepublicState {
                 districts[i].unrest = clamp(districts[i].unrest + e.districtUnrest)
             }
             if e.districtNeglectReset { districts[i].neglectDays = 0 }
-        } else if e.districtUnrest != 0 {
+        } else {
             for i in districts.indices {
-                districts[i].unrest = clamp(districts[i].unrest + e.districtUnrest)
+                if e.districtUnrest != 0 { districts[i].unrest = clamp(districts[i].unrest + e.districtUnrest) }
+                if e.districtNeglectReset { districts[i].neglectDays = 0 }
             }
         }
 
@@ -130,5 +131,44 @@ extension RepublicState {
             factions[Int(f.rawValue)].adjust(d, on: day, reason: .policyChange, detail: "decision")
             if d > 0 { factions[Int(f.rawValue)].honouredDemands += 1 }
         }
+    }
+}
+
+
+extension DecreeCatalogue {
+    public static func nextAvailableDay(_ name: String, in state: RepublicState) -> Int32? {
+        guard let last = state.decreeLastIssued?[name] else { return nil }
+        let next = last + state.config.effectiveDecreeCooldownDays
+        return next > state.day ? next : nil
+    }
+
+    public static func unavailableReason(for spec: DecreeSpec, in state: RepublicState) -> String? {
+        if state.blocksAdvance { return "Resolve the blocking council decision first." }
+        if let day = nextAvailableDay(spec.name, in: state) { return "Available again on Day \(day)." }
+        let cost = max(spec.cost, spec.effect.treasuryCost)
+        if state.treasury < cost { return "Need $\(cost - state.treasury) more in the treasury." }
+        if spec.effect.foodImport > 0 && !state.buildings.contains(where: { $0.kind == .market && $0.isStanding(on: state.map) }) {
+            return "Open a market before importing food."
+        }
+        return nil
+    }
+}
+
+extension SimulationEngine {
+    /// Direct button and council offer share one validated application path.
+    static func enactStandingDecree(_ name: String, in state: inout RepublicState) -> IntentResult {
+        guard let spec = DecreeCatalogue.all.first(where: { $0.name == name }) else { return .rejected(.decreeUnavailable) }
+        if DecreeCatalogue.nextAvailableDay(name, in: state) != nil { return .rejected(.decreeCoolingDown) }
+        let cost = max(spec.cost, spec.effect.treasuryCost)
+        guard state.treasury >= cost else { return .rejected(.insufficientTreasury) }
+        guard DecreeCatalogue.unavailableReason(for: spec, in: state) == nil else { return .rejected(.decreeUnavailable) }
+        var effect = spec.effect
+        effect.treasuryCost = cost
+        state.apply(effect, at: EventLocation())
+        if state.decreeLastIssued == nil { state.decreeLastIssued = [:] }
+        state.decreeLastIssued?[name] = state.day
+        state.agenda.removeAll { $0.kind == .decree && $0.causes.contains { $0.detail == name } }
+        state.emit(.decreeIssued, causes: [CauseFactor(.policyChange, value: Int32(clamping: cost), detail: name)])
+        return .accepted
     }
 }

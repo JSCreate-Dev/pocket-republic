@@ -11,10 +11,16 @@ struct IslandView: View {
     @EnvironmentObject private var clock: DayClock
     @Environment(\.verticalSizeClass) private var verticalSizeClass
     @Environment(\.layoutDirection) private var layoutDirection
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.scenePhase) private var appPhase
+    @AppStorage("pocket.republic.intro.seed.v1") private var touredSeed = ""
+    @AppStorage("pocket.republic.intro.enabled.v1") private var automaticTours = true
     @State private var scene = IslandScene(size: CGSize(width: 400, height: 470))
     @State private var tool: CityTool = .inspect
     @State private var selectedTile: TileIndex?
     @State private var selectedBuildingID: BuildingID?
+    @State private var selectedCitizenID: CitizenID?
+    @State private var citizenActivity = ""
     @State private var selectedAgendaID: DecisionID?
     @State private var placementHint: String?
     @State private var sheetExpanded = false
@@ -35,6 +41,14 @@ struct IslandView: View {
     @State private var mapOverlay: MapOverlayMode = .standard
     @State private var showLayerHelp = false
     @State private var showGrowth = false
+    @State private var showJournal = false
+    @State private var focusGoals: [CityFocus] = []
+    @State private var dayBaseline: CityDaySnapshot?
+    @State private var dayResults: [CityDayResult] = []
+    @State private var queuedFocus: CityFocusAction?
+    @State private var queuedTour = false
+    @State private var tour = FoundingTourPolicy()
+    @State private var tourRun = UUID()
 
     var body: some View {
         GeometryReader { geometry in
@@ -48,6 +62,7 @@ struct IslandView: View {
                                            cardOpen: cardOpen)
             ZStack(alignment: .topLeading) {
                 SpriteView(scene: scene)
+                    .allowsHitTesting(!tour.active).accessibilityHidden(tour.active)
                     .background(Color(red: 0.05, green: 0.22, blue: 0.37))
 
                 if layout.mapFirst {
@@ -71,9 +86,10 @@ struct IslandView: View {
                     }
                     .padding(8)
                     .frame(maxWidth: .infinity, alignment: .topLeading)
+                    .opacity(tour.active ? 0 : 1).allowsHitTesting(!tour.active).accessibilityHidden(tour.active)
                 }
 
-                if layout.mapFirst, let tile = selectedTile, !cardOpen, tool == .inspect {
+                if layout.mapFirst, !tour.active, let tile = selectedTile, !cardOpen, tool == .inspect {
                     HStack(spacing: 8) {
                         Text("Tile \(game.state.map.x(of: tile)), \(game.state.map.y(of: tile)) · \(terrainLabel(at: tile))\(overlayTileDescription(tile))")
                             .font(.caption).fixedSize(horizontal: false, vertical: true)
@@ -90,6 +106,7 @@ struct IslandView: View {
 
                 if layout.mode == .tent && !tentControlsOpen {
                     tentDock()
+                        .opacity(tour.active ? 0 : 1).allowsHitTesting(!tour.active).accessibilityHidden(tour.active)
                         .frame(width: layout.controls.width, height: layout.controls.height)
                         .position(x: layout.controls.midX, y: layout.controls.midY)
                 } else {
@@ -104,6 +121,17 @@ struct IslandView: View {
                             }
                         }
                         .position(x: layout.controls.midX, y: layout.controls.midY)
+                        .opacity(tour.active ? 0 : 1).allowsHitTesting(!tour.active).accessibilityHidden(tour.active)
+                }
+                if tour.active {
+                    if layout.mapFirst {
+                        foundingTourOverlay.transition(.opacity).zIndex(20)
+                    } else {
+                        foundingTourOverlay
+                            .frame(width: layout.controls.width, height: layout.controls.height)
+                            .position(x: layout.controls.midX, y: layout.controls.midY)
+                            .transition(.opacity).zIndex(20)
+                    }
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -114,9 +142,11 @@ struct IslandView: View {
                 scene.render(game.state)
                 scene.setOverlay(mapOverlay)
                 scene.setSelection(selectedBuildingID)
+                scene.setCitizenSelection(selectedCitizenID)
                 configureTapHandler()
                 presentAttention()
                 if seenSeason == nil { seenSeason = seasonSignature }
+                considerOpeningTour()
             }
             .sensoryFeedback(.selection, trigger: selectedBuildingID) { _, newValue in
                 newValue != nil
@@ -125,6 +155,33 @@ struct IslandView: View {
                 scene.setFraming(framing)
             }
         }
+        .sheet(isPresented: $showJournal, onDismiss: finishJournal) {
+            CityReadingSheet("Island Journal") {
+                IslandJournalPanel(goals: focusGoals, results: dayResults,
+                    automaticTours: $automaticTours,
+                    canTour: !game.state.blocksAdvance && game.saveIssue == nil && tool == .inspect,
+                    onGoal: { action in queuedFocus = action; showJournal = false },
+                    onTour: { queuedTour = true; showJournal = false })
+            }
+        }
+        .task(id: tourRun) {
+            guard tour.active else { return }
+            await Task.yield()
+            guard !Task.isCancelled, tour.active else { return }
+            scene.presentTourBeat(tour.beat, reduceMotion: reduceMotion || UIAccessibility.isVoiceOverRunning)
+            guard !UIAccessibility.isVoiceOverRunning else { return }
+            for _ in 0..<FoundingTourPolicy.beatCount {
+                do { try await Task.sleep(for: .seconds(2.5)) } catch { return }
+                guard !Task.isCancelled, tour.active else { return }
+                guard !UIAccessibility.isVoiceOverRunning else { return }
+                advanceTour()
+            }
+        }
+        .onChange(of: reduceMotion) { _, reduced in if reduced { scene.stopTourMotion() } }
+        .onChange(of: appPhase) { _, phase in
+            if phase != .active { finishTour() } else { considerOpeningTour() }
+        }
+        .onChange(of: game.saveIssue) { _, issue in if issue != nil { finishTour() } }
         .sheet(isPresented: $showRoadmap) {
             CityReadingSheet("Republic Roadmap") {
                 DevelopmentRoadmap()
@@ -153,6 +210,12 @@ struct IslandView: View {
             unlockedBanner = nil
         }
         .onReceive(game.$state) { state in
+            observeIsland(state)
+            if state.blocksAdvance || game.saveIssue != nil { finishTour() }
+            if let id = selectedCitizenID,
+               id.raw < 0 || Int(id.raw) >= state.citizens.count || !state.citizens[Int(id.raw)].alive {
+                selectedCitizenID = nil
+            }
             if let receipt = placementReceipt, state.map.buildingAt(receipt.anchor) != receipt.id {
                 placementReceipt = nil
             }
@@ -166,12 +229,28 @@ struct IslandView: View {
             }
         }
         .onChange(of: game.state.worldSeed) { _, _ in
+            finishTour()
+            queuedFocus = nil
+            queuedTour = false
+            showJournal = false
+            leaveBuildSession()
+            selectedAgendaID = nil
+            dismissedIslandEvent = nil
+            dismissedBlocking = nil
+            seenSeason = seasonSignature
+            seasonBanner = nil
+            showGrowth = false
+            showLayerHelp = false
+            showCharter = false
+            mapOverlay = .standard
+            selectedCitizenID = nil
             showRoadmap = false
             unlockedBanner = nil
             placementReceipt = nil
             roadReceipt = nil
             selectedBuildingID = nil
             selectedTile = nil
+            considerOpeningTour()
         }
         .onChange(of: game.state.treasury) { _, _ in
             if tool == .road { scene.setRoadPreview(roadMarks) }
@@ -181,6 +260,7 @@ struct IslandView: View {
         }
         .onChange(of: tool) { _, newTool in
             if newTool != .inspect {
+                selectedCitizenID = nil
                 selectedBuildingID = nil
                 scene.setSelection(nil)
             }
@@ -203,13 +283,19 @@ struct IslandView: View {
             UIAccessibility.post(notification: .announcement, argument: "Unlocked \(earned.title). \(earned.reward)")
         }
         .onChange(of: showCatalog) { _, shown in
+            if shown { selectedCitizenID = nil }
             clock.setModal(IslandSessionHold.catalogToken, presented: false)
         }
         .onChange(of: islandVisible) { _, visible in
-            if !visible { leaveBuildSession() }
+            if !visible { finishTour(); leaveBuildSession() } else { considerOpeningTour() }
         }
         .onDisappear {
+            finishTour()
             if !islandVisible { leaveBuildSession() }
+        }
+        .onChange(of: selectedCitizenID) { _, id in
+            citizenActivity = ""
+            scene.setCitizenSelection(id)
         }
         .onChange(of: selectedBuildingID) { _, id in
             scene.setSelection(id)
@@ -256,11 +342,17 @@ struct IslandView: View {
             } else if showCatalog {
                 catalog
             } else {
-                if let inspection = buildingInspection {
+                if let citizen = selectedCitizen {
+                    citizenCard(citizen)
+                } else if let inspection = buildingInspection {
                     if let building = selectedBuilding, mapOverlay != .standard {
                         Text(String(overlayTileDescription(building.anchor).dropFirst(3)))
                             .font(.caption.weight(.semibold))
                             .padding(.horizontal, 8)
+                    }
+                    if let id = selectedBuildingID, let issue = BuildingInspector.attention(id: id, in: game.state) {
+                        Text(issue.help).font(.caption).foregroundStyle(RepublicTheme.brass)
+                            .fixedSize(horizontal: false, vertical: true).padding(.horizontal, 8)
                     }
                     BuildingInspectPanel(
                         inspection: inspection,
@@ -313,6 +405,7 @@ struct IslandView: View {
             if layout.mapFirst {
                 mapDock(wide: layout.controls.width >= 640)
             } else {
+                if tool.isBuilding { placementActions.padding(.horizontal, 8) }
                 dayClockControls
                     .padding(.horizontal, 8)
                 Button { game.advance() } label: {
@@ -351,6 +444,9 @@ struct IslandView: View {
     }
 
     @ViewBuilder private var dockTools: some View {
+        if tool.isBuilding {
+            placementActions
+        } else {
         dockTool(.inspect)
         Button {
             showCatalog.toggle()
@@ -362,6 +458,7 @@ struct IslandView: View {
         .buttonStyle(RepublicDockButton(selected: showCatalog || tool.isBuilding))
         .accessibilityLabel(showCatalog ? "Close build catalog" : "Open build catalog")
         dockTool(.road)
+        }
     }
 
     @ViewBuilder private var clockTools: some View {
@@ -464,6 +561,8 @@ struct IslandView: View {
                 }
                 Spacer(minLength: 0)
                 Menu {
+                    Button("Island Journal", systemImage: "book.closed") { showJournal = true }
+                    Divider()
                     Picker("Map layer", selection: $mapOverlay) {
                         ForEach(MapOverlayMode.allCases) { mode in
                             Label(mode.title, systemImage: mode.symbol).tag(mode)
@@ -475,7 +574,7 @@ struct IslandView: View {
                         .frame(width: 44, height: 44)
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel("Map layers: \(mapOverlay.title)")
+                .accessibilityLabel("Map layers and Island Journal: \(mapOverlay.title)")
                 .accessibilityHint("Switches fertility, happiness, food access and job overlays")
             }
             if mapOverlay != .standard {
@@ -509,7 +608,7 @@ struct IslandView: View {
             } else if let hint = tool.isBuilding ? placementHint : game.feedback {
                 Text(hint).font(.caption).foregroundStyle(RepublicTheme.brass).lineLimit(2)
             } else if hungryResidents > 0 {
-                Button { showGrowth = true } label: {
+                Button { showJournal = true } label: {
                     Label("\(hungryResidents) hungry · check market access and food", systemImage: "exclamationmark.triangle.fill")
                         .font(.caption2.weight(.semibold)).foregroundStyle(RepublicTheme.sand)
                         .frame(minHeight: 44, alignment: .leading)
@@ -517,16 +616,21 @@ struct IslandView: View {
                 .buttonStyle(.plain)
             }
             if unlockedBanner == nil && mapOverlay == .standard && game.saveIssue == nil && game.feedback == nil && !tool.isBuilding && hungryResidents == 0 {
-                Button { showGrowth = true } label: {
+                Button { showJournal = true } label: {
                     HStack(spacing: 6) {
-                        Text(developmentHint).lineLimit(2)
+                        VStack(alignment: .leading, spacing: 2) {
+                            if let result = dayResults.first, result.populationDelta > 0 || result.newlyOpened > 0 {
+                                Text(result.headline).fontWeight(.semibold).foregroundStyle(RepublicTheme.brass)
+                            }
+                            Text("Next: \(developmentHint)").lineLimit(2)
+                        }
                         Image(systemName: "info.circle")
                     }
                     .font(.caption2).foregroundStyle(RepublicTheme.paper.opacity(0.85))
                     .frame(minHeight: 44, alignment: .leading)
                 }
                 .buttonStyle(.plain)
-                .accessibilityHint("Shows all current newcomer requirements")
+                .accessibilityHint("Opens current goals and recent day results")
             }
             if let seasonBanner {
                 Text(seasonBanner).font(.caption.weight(.bold)).foregroundStyle(RepublicTheme.brass)
@@ -639,18 +743,84 @@ struct IslandView: View {
         .accessibilityElement(children: .contain)
     }
 
+    private var foundingTourOverlay: some View {
+        FoundingTourOverlay(beat: tour.beat, population: Int(game.snapshot.population),
+            nextGoal: focusGoals.first?.title ?? "Build a working settlement",
+            onSkip: finishTour, onContinue: advanceTour)
+    }
+
     private var developmentHint: String {
-        let living = game.state.citizens.filter(\.alive)
-        let beds = game.state.buildings.filter { $0.kind == .house && $0.isStanding(on: game.state.map) }
-            .reduce(0) { $0 + max(0, Int($1.kind.housingCapacity) - $1.residents.count) }
-        guard let rules = game.state.config.settlementGrowth else {
-            return "Residents find jobs automatically · view city capacity"
+        focusGoals.first?.title ?? "Review your island's next move"
+    }
+
+    private func observeIsland(_ state: RepublicState) {
+        focusGoals = CityFocusReader.goals(in: state)
+        let snapshot = CityDaySnapshot(state: state)
+        guard let previous = dayBaseline, previous.seed == snapshot.seed else {
+            dayBaseline = snapshot
+            dayResults = []
+            return
         }
-        let happiness = living.isEmpty ? 0 : living.reduce(Int64(0)) { $0 + Int64($1.happiness) } / Int64(living.count)
-        var hints: [String] = []
-        if beds == 0 { hints.append("Housing full") }
-        if happiness < Int64(rules.minimumHappiness) { hints.append("Happiness needs \(rules.minimumHappiness)%") }
-        return hints.isEmpty ? "\(beds) spare beds · check newcomer readiness" : hints.joined(separator: " · ")
+        if let result = CityDayResult.compare(previous, snapshot) {
+            dayResults.insert(result, at: 0)
+            dayResults = Array(dayResults.prefix(6))
+            dayBaseline = snapshot
+        }
+    }
+
+    private func finishJournal() {
+        let action = queuedFocus
+        let replay = queuedTour
+        queuedFocus = nil
+        queuedTour = false
+        guard islandVisible else { return }
+        if replay { startTour(); return }
+        guard let action else { return }
+        if game.state.blocksAdvance { presentAttention(); return }
+        switch action {
+        case .build(let kind):
+            guard game.saveIssue == nil, DevelopmentTree.canBuild(kind, in: game.state),
+                  let option = CityTool.allCases.first(where: { $0.buildingKind == kind }) else { return }
+            tool = option
+            showCatalog = false
+            configureTapHandler()
+        case .inspect(let id): inspectCitizenBuilding(id)
+        case .overlay(let mode): tool = .inspect; mapOverlay = mode
+        case .growth: showGrowth = true
+        case .roadmap: showRoadmap = true
+        }
+    }
+
+    private func considerOpeningTour() {
+        guard FoundingTourPolicy.shouldAutostart(day: game.state.day, seed: game.state.worldSeed,
+            seenSeed: touredSeed, enabled: automaticTours && game.state.development != nil,
+            blocked: game.state.blocksAdvance || game.saveIssue != nil || !islandVisible || appPhase != .active || UIApplication.shared.applicationState != .active || UIAccessibility.isVoiceOverRunning)
+        else { return }
+        startTour()
+    }
+
+    private func startTour() {
+        guard islandVisible, appPhase == .active, UIApplication.shared.applicationState == .active, tool == .inspect, !game.state.blocksAdvance, game.saveIssue == nil else { return }
+        guard withAnimation((reduceMotion || UIAccessibility.isReduceMotionEnabled) ? nil : .easeInOut(duration: 0.2), { tour.begin() }) else { return }
+        touredSeed = String(game.state.worldSeed)
+        selectedCitizenID = nil
+        selectedBuildingID = nil
+        selectedTile = nil
+        showCatalog = false
+        tourRun = UUID()
+        clock.setModal("founding-tour", presented: true)
+    }
+
+    private func advanceTour() {
+        guard tour.active else { return }
+        if tour.advance() { scene.presentTourBeat(tour.beat, reduceMotion: reduceMotion || UIAccessibility.isVoiceOverRunning) }
+        else { finishTour() }
+    }
+
+    private func finishTour() {
+        withAnimation((reduceMotion || UIAccessibility.isReduceMotionEnabled) ? nil : .easeInOut(duration: 0.2)) { tour.finish() }
+        scene.endTourCamera()
+        clock.setModal("founding-tour", presented: false)
     }
 
     private var growthDetails: some View {
@@ -980,6 +1150,76 @@ struct IslandView: View {
         return String(describing: map.terrain(at: tile)).capitalized
     }
 
+    private var selectedCitizen: Citizen? {
+        guard let id = selectedCitizenID, id.raw >= 0, Int(id.raw) < game.state.citizens.count else { return nil }
+        let citizen = game.state.citizens[Int(id.raw)]
+        return citizen.alive && citizen.id == id ? citizen : nil
+    }
+
+    private func citizenCard(_ citizen: Citizen) -> some View {
+        let routine = WalkerRoutine.plan(for: citizen, in: game.state, access: game.state.buildingAccess())
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(citizen.name).font(.headline)
+                    Text("Age \(citizen.age) · \(String(describing: citizen.occupation).capitalized)")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 8)
+                Button { selectedCitizenID = nil } label: {
+                    Image(systemName: "xmark").frame(width: 44, height: 44)
+                }.accessibilityLabel("Close resident inspection")
+            }
+            Text(citizenActivity.isEmpty ? "Daily routine" : citizenActivity)
+                .font(.subheadline.weight(.semibold)).foregroundStyle(RepublicTheme.brass)
+            Text("Happiness \(citizen.happiness)% · $\(citizen.money) · \(citizen.daysHungry == 0 ? "Fed" : "Hungry for \(citizen.daysHungry) days")")
+                .font(.caption).fixedSize(horizontal: false, vertical: true)
+            Text("Gold line: today's planned trips. Residents find jobs automatically.")
+                .font(.caption2).foregroundStyle(.secondary)
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 8) {
+                    citizenBuildingLink(citizen.home, fallback: "No home")
+                    citizenBuildingLink(citizen.work, fallback: "Seeking work")
+                }
+                VStack(spacing: 8) {
+                    citizenBuildingLink(citizen.home, fallback: "No home")
+                    citizenBuildingLink(citizen.work, fallback: "Seeking work")
+                }
+            }
+            DisclosureGroup("Daily stops") {
+                VStack(alignment: .leading, spacing: 4) {
+                    ForEach(routine.stops.indices, id: \.self) { index in
+                        Text("\(routine.dwellStart[index]):00–\(routine.dwellEnd[index]):00 · \(routine.stops[index].rawValue.capitalized)")
+                            .font(.caption)
+                    }
+                }.frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .padding(12)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14))
+    }
+
+    private func citizenBuildingLink(_ id: BuildingID?, fallback: String) -> some View {
+        let name: String
+        if let id, id.raw >= 0, Int(id.raw) < game.state.buildings.count {
+            let kind = game.state.buildings[Int(id.raw)].kind
+            let title = kind == .townHall ? "Town hall" : String(describing: kind).capitalized
+            name = "\(title) #\(id.raw + 1)"
+        } else { name = fallback }
+        return Button(name) { inspectCitizenBuilding(id) }
+            .frame(maxWidth: .infinity, minHeight: 44)
+            .buttonStyle(.bordered).disabled(id == nil)
+    }
+
+    private func inspectCitizenBuilding(_ id: BuildingID?) {
+        guard let id, id.raw >= 0, Int(id.raw) < game.state.buildings.count else { return }
+        let building = game.state.buildings[Int(id.raw)]
+        guard building.occupiesGround(on: game.state.map) else { return }
+        selectedCitizenID = nil
+        selectedBuildingID = id
+        scene.focus(on: building.entrance)
+    }
+
     private var selectedBuilding: Building? {
         guard let selectedBuildingID else { return nil }
         guard selectedBuildingID.raw >= 0, Int(selectedBuildingID.raw) < game.state.buildings.count else { return nil }
@@ -1003,21 +1243,38 @@ struct IslandView: View {
         scene.setPlacementKind(activeTool.buildingKind, fallbackHover: placeTile)
         scene.onHoverTile = { tile in
             Task { @MainActor in
-                guard tool == activeTool, islandVisible else { return }
+                guard !tour.active, tool == activeTool, islandVisible else { return }
                 if activeTool.isBuilding { placeTile = tile }
             }
         }
         scene.onRoadTile = { tile in
             Task { @MainActor in
-                guard roadDraft.last != tile, roadDraft.count < 24 else { return }
+                guard !tour.active, tool == .road, activeTool == .road, islandVisible,
+                      roadDraft.last != tile, roadDraft.count < 24 else { return }
                 roadDraft.append(tile)
                 scene.setRoadPreview(roadMarks)
             }
         }
+        scene.onCitizenTap = { id in
+            Task { @MainActor in
+                guard !tour.active, activeTool == .inspect, tool == .inspect, islandVisible else { return }
+                showCatalog = false
+                selectedBuildingID = nil
+                selectedTile = nil
+                selectedCitizenID = id
+            }
+        }
+        scene.onCitizenActivity = { id, activity in
+            Task { @MainActor in
+                guard selectedCitizenID == id, citizenActivity != activity else { return }
+                citizenActivity = activity
+            }
+        }
         scene.onTileTap = { tile in
             Task { @MainActor in
-                guard tool == activeTool, islandVisible else { return }
+                guard !tour.active, tool == activeTool, islandVisible else { return }
                 if activeTool == .inspect {
+                    selectedCitizenID = nil
                     if let building = BuildingHitTest.building(on: tile, in: game.state) {
                         selectedBuildingID = building.id
                         selectedTile = nil
@@ -1059,7 +1316,7 @@ struct IslandView: View {
     }
 
     private var cardOpen: Bool {
-        showCatalog || selectedAgenda != nil || game.state.pending != nil || buildingInspection != nil
+        showCatalog || selectedAgenda != nil || game.state.pending != nil || buildingInspection != nil || selectedCitizen != nil || tool.isBuilding
     }
 
     private var detailOpen: Bool {
@@ -1125,9 +1382,37 @@ struct IslandView: View {
                 Button("Show fertility layer") { mapOverlay = .fertility }
                     .font(.caption.weight(.semibold)).frame(minHeight: 44)
             }
-            Text("Preview only until you tap Place.")
+            if let kind {
+                Text("\(kind.footprint.width)×\(kind.footprint.height) tiles · Treasury after: $\(game.state.treasury - kind.buildCost)")
+                    .font(.caption2).foregroundStyle(.secondary)
+            }
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 8) {
+                    nudgeButton("west", symbol: "arrow.up.left", dx: -1, dy: 0)
+                    nudgeButton("north", symbol: "arrow.up.right", dx: 0, dy: -1)
+                    nudgeButton("south", symbol: "arrow.down.left", dx: 0, dy: 1)
+                    nudgeButton("east", symbol: "arrow.down.right", dx: 1, dy: 0)
+                }
+                VStack(spacing: 8) {
+                    HStack(spacing: 8) {
+                        nudgeButton("west", symbol: "arrow.up.left", dx: -1, dy: 0)
+                        nudgeButton("north", symbol: "arrow.up.right", dx: 0, dy: -1)
+                    }
+                    HStack(spacing: 8) {
+                        nudgeButton("south", symbol: "arrow.down.left", dx: 0, dy: 1)
+                        nudgeButton("east", symbol: "arrow.down.right", dx: 1, dy: 0)
+                    }
+                }
+            }
+            Text("Finished-building preview · arrows move one tile · Place confirms.")
                 .font(.caption2.weight(.semibold)).foregroundStyle(.secondary)
-            HStack {
+        }
+    }
+
+    private var placementActions: some View {
+        let kind = tool.buildingKind
+        let canPlace = canConfirmPlacement
+        return HStack {
                 Button("Place · $\(kind?.buildCost ?? 0)") {
                     guard let kind, let placeTile else { return }
                     guard game.send(.placeBuilding(kind, at: placeTile)),
@@ -1162,7 +1447,31 @@ struct IslandView: View {
                 .buttonStyle(.bordered)
             }
             .frame(minHeight: 44)
+    }
+
+    private var canConfirmPlacement: Bool {
+        guard let kind = tool.buildingKind, let placeTile, game.saveIssue == nil else { return false }
+        if case .valid = SimulationEngine.validatePlacement(kind, at: placeTile, in: game.state) { return true }
+        return false
+    }
+
+    private func nudgePlacement(dx: Int32, dy: Int32) {
+        guard let tile = placeTile else { return }
+        let map = game.state.map
+        let x = map.x(of: tile) + dx, y = map.y(of: tile) + dy
+        guard x >= 0, x < map.width, y >= 0, y < map.height else { return }
+        let next = map.index(x: x, y: y)
+        placeTile = next
+        scene.movePlacement(to: next)
+    }
+
+    private func nudgeButton(_ label: String, symbol: String, dx: Int32, dy: Int32) -> some View {
+        Button { nudgePlacement(dx: dx, dy: dy) } label: {
+            Image(systemName: symbol).frame(minWidth: 44, maxWidth: .infinity, minHeight: 44)
         }
+        .buttonStyle(.bordered)
+        .disabled(placeTile == nil)
+        .accessibilityLabel("Move preview one tile \(label)")
     }
 
     private var roadBar: some View {
@@ -1527,4 +1836,170 @@ private struct CityReadingSheet<Content: View>: View {
         .presentationDetents([.large])
         .presentationDragIndicator(.visible)
     }
+}
+
+private struct IslandJournalPanel: View {
+    let goals: [CityFocus]
+    let results: [CityDayResult]
+    @Binding var automaticTours: Bool
+    let canTour: Bool
+    let onGoal: (CityFocusAction) -> Void
+    let onTour: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            Text("Your next move").font(RepublicTheme.heading(.title2))
+            Text("These are suggestions from the town's current needs. Build in your own order; residents handle their own jobs.")
+                .font(.subheadline).foregroundStyle(RepublicTheme.inkSoft)
+            ForEach(goals) { goal in
+                VStack(alignment: .leading, spacing: 10) {
+                    Text(goal.title).font(RepublicTheme.heading(.headline))
+                    Text(goal.detail).font(.subheadline).fixedSize(horizontal: false, vertical: true)
+                    if goal.target > 0 {
+                        HStack {
+                            ProgressView(value: goal.fraction).tint(RepublicTheme.grass)
+                            Text("\(goal.current) / \(goal.target)").font(.caption.monospacedDigit())
+                        }
+                    }
+                    Button(goal.actionLabel) { onGoal(goal.action) }
+                        .frame(minHeight: 44).buttonStyle(.borderedProminent).tint(RepublicTheme.terracotta)
+                }.dioramaCard()
+            }
+            Text("Recent days").font(RepublicTheme.heading(.title2))
+            if results.isEmpty {
+                Text("The first day result appears after the clock advances. Net changes include your building orders and policy decisions.")
+                    .font(.subheadline).foregroundStyle(RepublicTheme.inkSoft)
+            }
+            ForEach(results) { result in
+                VStack(alignment: .leading, spacing: 10) {
+                    Text(result.day - result.fromDay == 1 ? "Day \(result.day)" : "Days \(result.fromDay + 1)–\(result.day)")
+                        .font(.caption.weight(.bold)).foregroundStyle(RepublicTheme.inkSoft)
+                    Text(result.headline).font(RepublicTheme.heading(.headline))
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 130), alignment: .leading)], alignment: .leading, spacing: 8) {
+                        stat("Residents", signed(Int64(result.populationDelta)), positive: result.populationDelta >= 0)
+                        stat("Net treasury", money(result.treasuryDelta), positive: result.treasuryDelta >= 0)
+                        stat("Food stock", signed(result.foodDelta), positive: result.foodDelta >= 0)
+                        stat("Happiness", "\(signed(Int64(result.happinessDelta))) pts", positive: result.happinessDelta >= 0)
+                    }
+                    if result.newlyOpened > 0 {
+                        Label("\(result.newlyOpened) buildings opened", systemImage: "building.2.fill").font(.caption)
+                    }
+                    if result.hungry > 0 {
+                        Label("\(result.hungry) residents still need food", systemImage: "fork.knife")
+                            .font(.caption).foregroundStyle(RepublicTheme.alert)
+                    }
+                }.dioramaCard()
+            }
+            Text("These are the last six day results from this visit. Gazette keeps the detailed city events.")
+                .font(.caption).foregroundStyle(RepublicTheme.inkSoft)
+            Toggle("Opening tour for new islands", isOn: $automaticTours)
+            Button("Take a short island tour", action: onTour)
+                .frame(minHeight: 44).buttonStyle(.bordered).disabled(!canTour)
+            Text("Tours pause the clock and can be skipped. Finish any active building or road session before replaying.")
+                .font(.caption).foregroundStyle(RepublicTheme.inkSoft)
+        }.foregroundStyle(RepublicTheme.ink)
+    }
+
+    private func stat(_ label: String, _ value: String, positive: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(label).font(.caption).foregroundStyle(RepublicTheme.inkSoft)
+            Text(value).font(.subheadline.weight(.semibold).monospacedDigit())
+                .foregroundStyle(positive ? RepublicTheme.fertile : RepublicTheme.alert)
+        }
+    }
+    private func signed(_ value: Int64) -> String { value >= 0 ? "+\(value)" : "\(value)" }
+    private func money(_ value: Int64) -> String { value >= 0 ? "+$\(value)" : "−$\(value.magnitude)" }
+}
+
+private struct FoundingTourOverlay: View {
+    @Environment(\.dynamicTypeSize) private var textSize
+    let beat: Int
+    let population: Int
+    let nextGoal: String
+    let onSkip: () -> Void
+    let onContinue: () -> Void
+
+    private var title: String {
+        switch beat {
+        case 0: return "A new republic"
+        case 1: return "People make a town"
+        default: return "Give them a future"
+        }
+    }
+    private var caption: String {
+        switch beat {
+        case 0: return "\(population) residents call this island home. The next neighbourhood is yours to shape."
+        case 1: return "Food, work and a place to live keep the island moving. Residents find their own jobs."
+        default: return "Your next move: \(nextGoal). Start small and watch the town become yours."
+        }
+    }
+    private var continueButton: some View {
+        Button(beat == 2 ? "Enter your republic" : "Continue", action: onContinue)
+            .frame(minWidth: 120, maxWidth: .infinity, minHeight: 44).buttonStyle(.borderedProminent).tint(RepublicTheme.terracotta)
+    }
+    var body: some View {
+        GeometryReader { geometry in
+            VStack(spacing: 0) {
+                HStack {
+                    if geometry.size.width >= 260 && !textSize.isAccessibilitySize {
+                        Text("POCKET REPUBLIC").font(.system(size: 12, weight: .bold, design: .rounded)).tracking(2)
+                            .lineLimit(1).minimumScaleFactor(0.7)
+                    }
+                    Spacer(minLength: 8)
+                    Button("Skip", action: onSkip)
+                        .font(.subheadline.weight(.semibold)).frame(minWidth: 72, minHeight: 44)
+                        .accessibilityLabel("Skip opening tour")
+                }
+                .padding(.horizontal, 16).padding(.vertical, 4)
+                .background(LinearGradient(colors: [.black.opacity(0.9), .black.opacity(0.65)], startPoint: .top, endPoint: .bottom))
+                Spacer(minLength: 0)
+                VStack(alignment: .leading, spacing: 8) {
+                    ScrollView(.vertical, showsIndicators: true) {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("\(beat + 1) / 3").font(.caption.monospacedDigit()).foregroundStyle(RepublicTheme.brass)
+                            Text(title).font(RepublicTheme.heading(.title2)).accessibilityAddTraits(.isHeader)
+                            Text(caption).font(.subheadline)
+                            if textSize.isAccessibilitySize { continueButton }
+                        }
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .frame(height: max(32, min(textSize.isAccessibilitySize ? 300 : 150,
+                                               geometry.size.height - (textSize.isAccessibilitySize ? 110 : 170))))
+                    if !textSize.isAccessibilitySize { continueButton }
+                }
+                .padding(12).frame(maxWidth: .infinity, alignment: .leading)
+                .background(LinearGradient(colors: [.black.opacity(0.68), .black.opacity(0.96)], startPoint: .top, endPoint: .bottom))
+            }
+            .foregroundStyle(.white)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(Color.black.opacity(0.001))
+            .accessibilityElement(children: .contain)
+        }
+    }
+}
+
+// MARK: - Pure founding tour policy
+/// UI-only state. A skipped/finished tour never changes core saves or rewards.
+struct FoundingTourPolicy: Equatable {
+    static let beatCount = 3
+    private(set) var active = false
+    private(set) var beat = 0
+    var clockHeld: Bool { active }
+
+    static func shouldAutostart(day: Int32, seed: UInt64, seenSeed: String, enabled: Bool, blocked: Bool) -> Bool {
+        enabled && !blocked && day == 0 && seenSeed != String(seed)
+    }
+    mutating func begin() -> Bool {
+        guard !active else { return false }
+        beat = 0; active = true
+        return true
+    }
+    mutating func advance() -> Bool {
+        guard active else { return false }
+        if beat + 1 < Self.beatCount { beat += 1; return true }
+        active = false
+        return false
+    }
+    mutating func finish() { active = false }
 }

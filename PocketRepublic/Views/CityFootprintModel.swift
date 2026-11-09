@@ -127,6 +127,8 @@ extension IntentRejection {
         case .seasonNotReady: return "That step of the season is not ready yet."
         case .seasonAlreadyClaimed: return "That season reward was already taken."
         case .seasonFoundingRequired: return "Seal the charter before choosing a compact."
+        case .decreeUnavailable: return "This decree is unavailable. Check its requirements in Govern."
+        case .decreeCoolingDown: return "That decree is cooling down. Check its next available day in Govern."
         case .seasonPathTaken: return "The other compact is already in force."
         }
     }

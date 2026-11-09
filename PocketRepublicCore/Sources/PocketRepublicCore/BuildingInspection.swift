@@ -77,7 +77,35 @@ public struct BuildingInspection: Equatable, Sendable {
     }
 }
 
+public struct BuildingAttention: Equatable, Sendable {
+    public enum Kind: String, Sendable { case road, staff, food }
+    public let kind: Kind
+    public let title: String
+    public let help: String
+}
+
 public enum BuildingInspector {
+    /// Cheap map marker data: no service-range BFS or second economic model.
+    public static func attention(id: BuildingID, in state: RepublicState) -> BuildingAttention? {
+        guard id.raw >= 0, Int(id.raw) < state.buildings.count else { return nil }
+        let building = state.buildings[Int(id.raw)]
+        guard building.id == id, building.isStanding(on: state.map) else { return nil }
+        for problem in BuildingInspectCatalog.problemPriority
+        where BuildingInspectCatalog.matches(problem, building: building, state: state) {
+            switch problem {
+            case .noRoadAccess:
+                return BuildingAttention(kind: .road, title: "No road access", help: "Connect a road to an edge of this plot.")
+            case .understaffed:
+                return BuildingAttention(kind: .staff, title: "Understaffed", help: "Residents take jobs automatically. Check nearby housing and connected roads.")
+            case .noFood:
+                return BuildingAttention(kind: .food, title: "No food", help: building.kind == .house
+                    ? "Residents here are hungry. Check market access, food stock and their money."
+                    : "This market is empty. Check farm staffing and food supply, or import food.")
+            }
+        }
+        return nil
+    }
+
     /// Nil when the id is missing or no tile is still occupied (demolished buildings
     /// stay in the array, but `buildingAt` no longer names them).
     public static func make(id: BuildingID, in state: RepublicState) -> BuildingInspection? {
@@ -340,12 +368,15 @@ enum BuildingInspectCatalog {
     static func matches(_ problem: BuildingProblem, building: Building, state: RepublicState) -> Bool {
         switch problem {
         case .noRoadAccess:
-            return !BuildingHitTest.hasRoadAccess(building.id, on: state.map)
+            return !building.tilesCovered(on: state.map).contains { tile in
+                state.map.building(at: tile) == building.id && state.map.neighbours(of: tile).contains { state.map.isRoad(at: $0) }
+            }
         case .understaffed:
             let capacity = building.kind.workerCapacity
             return capacity > 0 && Int32(building.workers.count) < capacity
         case .noFood:
-            if building.kind.storesFood && building.foodStore <= 0 { return true }
+            // Empty farm/dock stock can simply mean today's food was delivered.
+            if building.kind == .market && building.foodStore <= 0 { return true }
             if building.kind == .house {
                 return building.residents.contains { id in
                     guard id.raw >= 0, Int(id.raw) < state.citizens.count else { return false }

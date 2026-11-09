@@ -38,6 +38,8 @@ public struct RepublicState: Codable, Sendable {
     public var legitimacy: Int32 = 65
 
     public var events: [GameEvent] = []
+    /// Absent in older saves; string keys preserve deterministic encoding.
+    public var decreeLastIssued: [String: Int32]? = nil
     public var pending: PendingDecision? = nil
     public var lastCrisisDay: Int32 = -9999
     /// Per-kind cooldown, indexed by DecisionKind.slot. District uprisings get

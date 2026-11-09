@@ -5,6 +5,14 @@ import PocketRepublicCore
 /// A disposable picture of the core state. No SpriteKit node is saved or simulated.
 final class IslandScene: SKScene {
     var onTileTap: ((TileIndex) -> Void)?
+    var onCitizenTap: ((CitizenID) -> Void)?
+    var onCitizenActivity: ((CitizenID, String) -> Void)?
+    private let citizenRouteLayer = SKNode()
+    private let attentionLayer = SKNode()
+    private var attentionNodes: [BuildingID: SKNode] = [:]
+    private var selectedCitizenID: CitizenID?
+    private var lastCitizenActivityTime: TimeInterval = -.infinity
+    private var lastCitizenActivity = ""
 
     private let terrainLayer = SKNode()
     private let shadowLayer = SKNode()
@@ -27,6 +35,7 @@ final class IslandScene: SKScene {
     private var previousLightingUpdate: TimeInterval = -.infinity
     private var reducedLightingMotion = UIAccessibility.isReduceMotionEnabled
     private var renderedState: RepublicState?
+    private var tourCamera: (position: CGPoint, scale: CGFloat, adjusted: Bool)?
     private var tileNodes: [Int32: SKSpriteNode] = [:]
     private var buildingNodes: [BuildingID: SKNode] = [:]
     /// What the player has already been shown. Effects key off this, not off redraws.
@@ -49,7 +58,7 @@ final class IslandScene: SKScene {
     var onPlacementHint: ((String?) -> Void)?
     var onHoverTile: ((TileIndex?) -> Void)?
     var onRoadTile: ((TileIndex) -> Void)?
-    var roadDrawing = false
+    var roadDrawing = false { didSet { updateMapDecorationVisibility() } }
     private var roadPreview: [(tile: TileIndex, accepted: Bool)] = []
     private var inspectEntrance: TileIndex?
     private var tileTextures: [String: SKTexture] = [:]
@@ -82,6 +91,10 @@ final class IslandScene: SKScene {
         selectionLayer.zPosition = 15
         ghostLayer.zPosition = 20
         peopleLayer.zPosition = 30
+        citizenRouteLayer.zPosition = 6
+        attentionLayer.zPosition = 45
+        addChild(citizenRouteLayer)
+        addChild(attentionLayer)
         addChild(terrainLayer)
         addChild(shadowLayer)
         addChild(entryLightLayer)
@@ -158,7 +171,12 @@ final class IslandScene: SKScene {
             routines.removeAll()
         }
         if presentedSeed != state.worldSeed {
+            endTourCamera()
             resetConstructionPresentation()
+            selectedCitizenID = nil
+            citizenRouteLayer.removeAllChildren()
+            attentionLayer.removeAllChildren()
+            attentionNodes.removeAll()
             lightingElapsed = 0
             previousLightingFrame = nil
             previousLightingUpdate = -.infinity
@@ -215,6 +233,17 @@ final class IslandScene: SKScene {
             changed = true
         }
         if changed { refreshPlacementGhost() }
+        updateMapDecorationVisibility()
+    }
+
+    /// Precision controls share the same validator and ghost as touch placement.
+    func movePlacement(to tile: TileIndex) {
+        guard placementKind != nil, let map = renderedState?.map,
+              tile.raw >= 0, Int(tile.raw) < map.tileCount else { return }
+        hoverTile = tile
+        refreshPlacementGhost()
+        onHoverTile?(tile)
+        tileTick.selectionChanged()
     }
 
     /// Drop the ghost after a building lands so the new sprite is not covered by a red "occupied" preview.
@@ -334,6 +363,8 @@ final class IslandScene: SKScene {
             siteLayouts.removeValue(forKey: id)
         }
         refreshPeople(state: state, rect: rect)
+        refreshCitizenRoute()
+        refreshAttention(state: state)
         refreshSelection()
         drawOverlay(state: state)
     }
@@ -351,6 +382,7 @@ final class IslandScene: SKScene {
         vignetteLayer.isHidden = diagnostic
         entryLightLayer.isHidden = diagnostic
         shadowLayer.isHidden = diagnostic
+        updateMapDecorationVisibility()
         refreshVisible(force: true)
     }
 
@@ -492,6 +524,38 @@ final class IslandScene: SKScene {
         if building.isUnderConstruction { visual.sawSite = true }
         siteVisuals[building.id] = visual
         configureCrew(on: container, stage: visual.displayed ?? stage, kind: building.kind)
+        configureBusinessLife(on: container, building: building)
+    }
+
+    private func configureBusinessLife(on container: SKNode, building: Building) {
+        guard building.kind == .workshop, building.isOperational, !building.workers.isEmpty,
+              overlayMode == .standard, !UIAccessibility.isReduceMotionEnabled else {
+            container.childNode(withName: "workshop-smoke")?.removeFromParent()
+            return
+        }
+        guard container.childNode(withName: "workshop-smoke") == nil else { return }
+        let smoke = SKEmitterNode()
+        smoke.name = "workshop-smoke"
+        smoke.particleTexture = Self.entryGlowTexture
+        smoke.particleBirthRate = 1.2
+        smoke.particleLifetime = 2.6
+        smoke.particleLifetimeRange = 0.3
+        smoke.particleSize = CGSize(width: 12, height: 12)
+        smoke.particleScale = 0.4
+        smoke.particleScaleSpeed = 0.2
+        smoke.particleSpeed = 6
+        smoke.particleSpeedRange = 1
+        smoke.emissionAngle = .pi / 2 + 0.18
+        smoke.emissionAngleRange = 0.15
+        smoke.particleAlpha = 0.16
+        smoke.particleAlphaSpeed = -0.06
+        smoke.particleColor = UIColor(white: 0.78, alpha: 1)
+        smoke.particleColorBlendFactor = 1
+        smoke.particlePositionRange = CGVector(dx: 3, dy: 0)
+        let size = BuildingSpriteCatalog.spec(for: .workshop).pointSize
+        smoke.position = CGPoint(x: -size.width * 0.08, y: size.height * 0.97)
+        smoke.zPosition = 2
+        container.addChild(smoke)
     }
 
     private func presentShadow(_ building: Building, layout: IsoFootprintLayout, config: BalanceConfig) {
@@ -555,6 +619,21 @@ final class IslandScene: SKScene {
     private func playCompletionPop(on container: SKNode) {
         guard let body = container.childNode(withName: "body") else { return }
         body.removeAction(forKey: "pop")
+        if UIAccessibility.isReduceMotionEnabled {
+            body.setScale(1); body.alpha = 1
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            return
+        }
+        if overlayMode == .standard {
+            let ring = SKShapeNode(ellipseOf: CGSize(width: 40, height: 20))
+            ring.name = "completion-ring"
+            ring.strokeColor = UIColor(red: 0.95, green: 0.77, blue: 0.32, alpha: 0.9)
+            ring.fillColor = .clear
+            ring.lineWidth = 2
+            ring.position = CGPoint(x: container.position.x, y: container.position.y + 20)
+            shadowLayer.addChild(ring)
+            ring.run(.sequence([.group([.scale(to: 2.8, duration: 0.6), .fadeOut(withDuration: 0.6)]), .removeFromParent()]))
+        }
         body.setScale(0.85)
         body.alpha = 1
         body.run(.sequence([
@@ -569,6 +648,7 @@ final class IslandScene: SKScene {
     private func playPlacementLand(on container: SKNode) {
         guard let body = container.childNode(withName: "body") else { return }
         body.removeAction(forKey: "land")
+        if UIAccessibility.isReduceMotionEnabled { body.setScale(1); return }
         body.setScale(0.9)
         body.run(.sequence([
             .scale(to: 1.05, duration: 0.12),
@@ -578,6 +658,7 @@ final class IslandScene: SKScene {
     }
 
     private func puffDust(on container: SKNode, scale: CGFloat) {
+        guard !UIAccessibility.isReduceMotionEnabled else { return }
         container.childNode(withName: "dust")?.removeFromParent()
         let dust = SKShapeNode(circleOfRadius: 18)
         dust.name = "dust"
@@ -639,6 +720,7 @@ final class IslandScene: SKScene {
     }
 
     private func stepCrew(time: TimeInterval) {
+        guard !UIAccessibility.isReduceMotionEnabled else { return }
         for (id, container) in buildingNodes {
             guard let crew = container.childNode(withName: "crew"),
                   let layout = siteLayouts[id] else { continue }
@@ -758,12 +840,22 @@ final class IslandScene: SKScene {
         case .grass, .fertile: node.color = UIColor(red: 0.72, green: 0.76, blue: 0.38, alpha: 1)
         case .rock: node.color = UIColor(red: 0.72, green: 0.65, blue: 0.53, alpha: 1)
         }
-        node.colorBlendFactor = terrain == .water ? 0.12 : 0.07
+        if terrain == .water, !MapArt.shoreNames(x: x, y: y, map: map).isEmpty {
+            node.color = UIColor(red: 0.30, green: 0.82, blue: 0.72, alpha: 1)
+            node.colorBlendFactor = 0.16
+        } else { node.colorBlendFactor = terrain == .water ? 0.03 : 0.02 }
         if terrain == .water, !UIAccessibility.isReduceMotionEnabled,
            let first = MapArt.texture(named: groundName), let next = MapArt.texture(named: "\(groundName)_f1") {
-            let delay = Double(MapArt.mix(x, y) % 4) * 0.22
-            node.run(.sequence([.wait(forDuration: delay),
-                                .repeatForever(.animate(with: [first, next], timePerFrame: 0.95, resize: false, restore: true))]),
+            // Align newly visible water to the scene's shared two-frame phase.
+            // Panning does not restart every tile on a different ripple frame.
+            let frameDuration: TimeInterval = 1.6
+            let phase = animationTime.truncatingRemainder(dividingBy: frameDuration * 2)
+            let firstHalf = phase < frameDuration
+            node.texture = firstHalf ? first : next
+            let wait = firstHalf ? frameDuration - phase : frameDuration * 2 - phase
+            let frames = firstHalf ? [next, first] : [first, next]
+            node.run(.sequence([.wait(forDuration: wait),
+                                .repeatForever(.animate(with: frames, timePerFrame: frameDuration, resize: false, restore: true))]),
                      withKey: "water-ripple")
         }
         node.size = MapArt.tileSize
@@ -780,6 +872,7 @@ final class IslandScene: SKScene {
             guard let texture = MapArt.texture(named: name) else { continue }
             let shore = SKSpriteNode(texture: texture, size: MapArt.tileSize)
             shore.anchorPoint = CGPoint(x: 0.5, y: 0.5)
+            shore.alpha = 0.42
             shore.zPosition = 0.4
             node.addChild(shore)
         }
@@ -870,6 +963,100 @@ final class IslandScene: SKScene {
         }
     }
 
+    func setCitizenSelection(_ id: CitizenID?) {
+        selectedCitizenID = id
+        lastCitizenActivity = ""
+        lastCitizenActivityTime = -.infinity
+        refreshCitizenRoute()
+    }
+
+    private func updateMapDecorationVisibility() {
+        let hidden = overlayMode != .standard || placementKind != nil || roadDrawing
+        citizenRouteLayer.isHidden = hidden
+        attentionLayer.isHidden = hidden
+    }
+
+    private func refreshCitizenRoute() {
+        citizenRouteLayer.removeAllChildren()
+        for (id, node) in citizenNodes {
+            node.childNode(withName: "citizen-ring")?.removeFromParent()
+            guard id == selectedCitizenID else { continue }
+            let ring = SKShapeNode(ellipseOf: CGSize(width: 20, height: 10))
+            ring.name = "citizen-ring"
+            ring.strokeColor = UIColor(red: 1, green: 0.83, blue: 0.3, alpha: 1)
+            ring.fillColor = .clear
+            ring.lineWidth = 2
+            ring.zPosition = -0.1
+            node.addChild(ring)
+        }
+        guard let id = selectedCitizenID, let state = renderedState,
+              id.raw >= 0, Int(id.raw) < state.citizens.count, state.citizens[Int(id.raw)].alive else { return }
+        let routine = self.routine(for: state.citizens[Int(id.raw)], in: state, access: state.buildingAccess())
+        guard let first = routine.path.first else { return }
+        let path = CGMutablePath()
+        path.move(to: point(for: first, in: state.map))
+        for tile in routine.path.dropFirst() { path.addLine(to: point(for: tile, in: state.map)) }
+        let line = SKShapeNode(path: path)
+        line.strokeColor = UIColor(red: 1, green: 0.78, blue: 0.24, alpha: 0.9)
+        line.lineWidth = 2
+        line.isUserInteractionEnabled = false
+        citizenRouteLayer.addChild(line)
+    }
+
+    private func updateCitizenActivity(at time: TimeInterval) {
+        guard time - lastCitizenActivityTime >= 0.5, let id = selectedCitizenID,
+              let routine = routines[id] else { return }
+        lastCitizenActivityTime = time
+        let hour = (time + walkerPhase(for: id)).truncatingRemainder(dividingBy: MapArt.visualDay) / MapArt.secondsPerHour
+        let names: [DailyRoutine.Stop: String] = [.home: "home", .work: "work", .market: "the market",
+            .clinic: "the clinic", .civic: "the civic hall", .leisure: "a social visit"]
+        let activity: String
+        switch routine.activity(atHour: hour) {
+        case .staying(let stop): activity = stop == .leisure ? "Social visit" : "At \(names[stop] ?? stop.rawValue)"
+        case .traveling(let stop): activity = "Walking to \(names[stop] ?? stop.rawValue)"
+        case nil: activity = "No reachable trip scheduled"
+        }
+        if activity != lastCitizenActivity {
+            lastCitizenActivity = activity
+            onCitizenActivity?(id, activity)
+        }
+    }
+
+    private func refreshAttention(state: RepublicState) {
+        let candidates = siteLayouts.keys.compactMap { id -> (BuildingID, BuildingAttention, CGFloat)? in
+            guard let issue = BuildingInspector.attention(id: id, in: state), let layout = siteLayouts[id] else { return nil }
+            let point = layout.southCorner(halfWidth: halfWidth, halfHeight: halfHeight)
+            return (id, issue, hypot(point.x - cameraNode.position.x, point.y - cameraNode.position.y))
+        }.sorted { $0.2 == $1.2 ? $0.0 < $1.0 : $0.2 < $1.2 }.prefix(12)
+        let wanted = Set(candidates.map { $0.0 })
+        for id in Array(attentionNodes.keys) where !wanted.contains(id) {
+            attentionNodes.removeValue(forKey: id)?.removeFromParent()
+        }
+        for (id, issue, _) in candidates {
+            let node: SKNode
+            if let cached = attentionNodes[id], cached.name == issue.kind.rawValue { node = cached }
+            else {
+                attentionNodes.removeValue(forKey: id)?.removeFromParent()
+                let badge = SKShapeNode(circleOfRadius: 12)
+                badge.fillColor = UIColor(red: 0.12, green: 0.15, blue: 0.13, alpha: 0.96)
+                badge.strokeColor = UIColor(red: 0.92, green: 0.68, blue: 0.24, alpha: 1)
+                badge.lineWidth = 1.5
+                let symbol = issue.kind == .food ? "fork.knife" : (issue.kind == .road ? "link" : "person.fill.questionmark")
+                if let image = UIImage(systemName: symbol)?.withTintColor(.white, renderingMode: .alwaysOriginal) {
+                    badge.addChild(SKSpriteNode(texture: SKTexture(image: image), size: CGSize(width: 14, height: 14)))
+                }
+                badge.name = issue.kind.rawValue
+                attentionLayer.addChild(badge)
+                attentionNodes[id] = badge
+                node = badge
+            }
+            guard let layout = siteLayouts[id] else { continue }
+            let building = state.buildings[Int(id.raw)]
+            let base = layout.southCorner(halfWidth: halfWidth, halfHeight: halfHeight)
+            node.position = CGPoint(x: base.x, y: base.y + BuildingSpriteCatalog.spec(for: building.kind).pointSize.height + 10)
+        }
+    }
+
     private func routine(for citizen: Citizen, in state: RepublicState, access: MapBuildingAccess) -> DailyRoutine {
         if let cached = routines[citizen.id] { return cached }
         let planned = WalkerRoutine.plan(for: citizen, in: state, access: access)
@@ -881,7 +1068,9 @@ final class IslandScene: SKScene {
         guard let state = renderedState else { return }
         animationTime = currentTime
         updateLighting(at: currentTime)
+        if cameraNode.action(forKey: "founding-tour") != nil { refreshVisible() }
         stepCrew(time: currentTime)
+        updateCitizenActivity(at: currentTime)
 
         let map = state.map
         for id in visibleCitizenIDs {
@@ -1051,16 +1240,31 @@ final class IslandScene: SKScene {
         }
 
         let buildDays = state.config.constructionDays(for: kind)
-        let ghostStage: ConstructionStage = buildDays > 0 ? .foundation : .complete
+        let ghostStage: ConstructionStage = .complete
         let ghost = BuildingArtwork.makeNode(kind: kind, stage: ghostStage)
         ghost.color = tint
-        ghost.colorBlendFactor = buildDays > 0 ? 0.4 : 0.55
-        ghost.alpha = 0.88
+        ghost.colorBlendFactor = accepted ? 0.22 : 0.5
+        ghost.alpha = 0.65
         ghost.position = layout.southCorner(halfWidth: halfWidth, halfHeight: halfHeight)
         ghost.zPosition = 1
         ghostLayer.addChild(ghost)
 
-        let height = SiteSpriteCatalog.spec(kind: kind, stage: ghostStage).size.height
+        if let entrance = preview.entrance {
+            let pin = SKSpriteNode(texture: markerTexture, size: markerSize)
+            pin.position = point(for: entrance, in: map)
+            pin.color = UIColor(red: 1, green: 0.83, blue: 0.25, alpha: 1)
+            pin.colorBlendFactor = 1
+            pin.alpha = 0.85
+            pin.zPosition = 3
+            ghostLayer.addChild(pin)
+            let arrow = SKLabelNode(text: "↓")
+            arrow.fontSize = 22
+            arrow.fontColor = .white
+            arrow.position = CGPoint(x: pin.position.x, y: pin.position.y + 5)
+            arrow.zPosition = 4
+            ghostLayer.addChild(arrow)
+        }
+        let height = BuildingSpriteCatalog.spec(for: kind).pointSize.height
         if let reason {
             let badge = reasonBadge(reason)
             badge.position = CGPoint(x: ghost.position.x, y: ghost.position.y + height + 16)
@@ -1135,6 +1339,16 @@ final class IslandScene: SKScene {
         let reduceMotion = UIAccessibility.isReduceMotionEnabled
         if reduceMotion != reducedLightingMotion {
             reducedLightingMotion = reduceMotion
+            if reduceMotion {
+                stopTourMotion()
+                for container in buildingNodes.values {
+                    container.childNode(withName: "dust")?.removeFromParent()
+                    if let body = container.childNode(withName: "body") {
+                        body.removeAction(forKey: "pop"); body.removeAction(forKey: "land"); body.setScale(1)
+                    }
+                }
+                for ring in shadowLayer.children where ring.name == "completion-ring" { ring.removeFromParent() }
+            }
             // Reconfigure visible water to stop/start existing ripple actions.
             for node in tileNodes.values { node.name = nil }
             refreshVisible(force: true)
@@ -1293,12 +1507,42 @@ final class IslandScene: SKScene {
             touchStart = nil
             hoverBeforeGesture = nil
         }
-        guard !cancelled, remaining == 0, let state = renderedState, let touch = touches.first,
-              let tile = tile(at: touch.location(in: self), in: state.map) else { return }
+        guard !cancelled, remaining == 0, let state = renderedState, let touch = touches.first else { return }
+        let location = touch.location(in: self)
         if roadTap {
-            onRoadTile?(tile)
+            if let tile = tile(at: location, in: state.map) { onRoadTile?(tile) }
         } else if !roadDrawing && !wasDrag && !wasMulti {
-            onTileTap?(tile)
+            if placementKind == nil, overlayMode == .standard {
+                let screen = touch.location(in: cameraNode)
+                let people = citizenNodes.compactMap { id, node -> (CitizenID, CGFloat)? in
+                    guard node.alpha > 0.05, !node.isHidden else { return nil }
+                    let point = node.convert(CGPoint(x: 0, y: 8), to: cameraNode)
+                    let distance = hypot(point.x - screen.x, point.y - screen.y)
+                    guard distance <= 22 else { return nil }
+                    // A walker behind a nearer building must not steal its tap.
+                    let obscured = buildingNodes.values.contains { container in
+                        guard container.zPosition > node.zPosition,
+                              let body = container.childNode(withName: "body"), body.alpha > 0.05 else { return false }
+                        return body.frame.contains(container.convert(CGPoint(x: 0, y: 8), from: node))
+                    }
+                    return obscured ? nil : (id, distance)
+                }
+                if let person = people.min(by: { $0.1 == $1.1 ? $0.0 < $1.0 : $0.1 < $1.1 }) {
+                    tileTick.selectionChanged()
+                    onCitizenTap?(person.0)
+                    return
+                }
+                let signs = attentionNodes.map { id, node -> (BuildingID, CGFloat) in
+                    let point = node.convert(.zero, to: cameraNode)
+                    return (id, hypot(point.x - screen.x, point.y - screen.y))
+                }
+                if let sign = signs.filter({ $0.1 <= 22 }).min(by: { $0.1 == $1.1 ? $0.0 < $1.0 : $0.1 < $1.1 }) {
+                    tileTick.selectionChanged()
+                    onTileTap?(state.buildings[Int(sign.0.raw)].tile)
+                    return
+                }
+            }
+            if let tile = tile(at: location, in: state.map) { onTileTap?(tile) }
         }
     }
 
@@ -1322,6 +1566,45 @@ final class IslandScene: SKScene {
     }
 
     /// Keep the confirmed site's position inside the usable map, above controls.
+    /// A camera tour is visual only; its bounded clock hold belongs to IslandView.
+    func presentTourBeat(_ beat: Int, reduceMotion: Bool) {
+        guard let state = renderedState else { return }
+        if tourCamera == nil {
+            tourCamera = (cameraNode.position, cameraNode.xScale, cameraUserAdjusted)
+        }
+        cameraNode.removeAction(forKey: "founding-tour")
+        guard !reduceMotion, !UIAccessibility.isReduceMotionEnabled, !UIAccessibility.isVoiceOverRunning else { return }
+        let kinds: [BuildingKind] = [.townHall, .farm, .market]
+        let kind = kinds[min(2, max(0, beat))]
+        guard let building = state.buildings.first(where: { $0.kind == kind && $0.isStanding(on: state.map) }) else { return }
+        let world = point(for: building.entrance, in: state.map)
+        let focus = framing?.focusRect ?? CGRect(origin: .zero, size: size)
+        let target = CGPoint(x: world.x - (focus.midX - size.width / 2) * cameraNode.xScale,
+                             y: world.y + (focus.midY - size.height / 2) * cameraNode.yScale)
+        cameraUserAdjusted = true
+        let previous = cameraNode.position
+        cameraNode.position = target
+        clampCameraToMap()
+        let bounded = cameraNode.position
+        cameraNode.position = previous
+        let move = SKAction.move(to: bounded, duration: 2.1)
+        move.timingMode = .easeInEaseOut
+        cameraNode.run(move, withKey: "founding-tour")
+    }
+
+    func stopTourMotion() { cameraNode.removeAction(forKey: "founding-tour") }
+
+    func endTourCamera() {
+        cameraNode.removeAction(forKey: "founding-tour")
+        guard let old = tourCamera else { return }
+        tourCamera = nil
+        cameraNode.position = old.position
+        cameraNode.setScale(old.scale)
+        cameraUserAdjusted = old.adjusted
+        clampCameraToMap()
+        refreshVisible(force: true)
+    }
+
     func focus(on tile: TileIndex) {
         guard let state = renderedState, tile.raw >= 0, Int(tile.raw) < state.map.tileCount else { return }
         let world = point(for: tile, in: state.map)
@@ -1454,13 +1737,27 @@ private enum MapArt {
     ]
 
     private static var textures: [String: SKTexture] = [:]
+    private static var textureKeys: [String: String] = [:]
 
     static func texture(named name: String) -> SKTexture? {
-        if let cached = textures[name] { return cached }
-        guard let image = UIImage(named: name) else { return nil }
+        if let key = textureKeys[name], let cached = textures[key] { return cached }
+        let material: String
+        if name.hasPrefix("tile_grass_") || name.hasPrefix("tile_fertile_") {
+            material = "tile_grass_golden"
+        } else if name.hasPrefix("tile_water_") {
+            material = name.hasSuffix("_f1") ? "tile_water_golden_f1" : "tile_water_golden"
+        } else if name.hasPrefix("tile_sand_") { material = "tile_sand_golden" }
+        else if name.hasPrefix("tile_rock_") { material = "tile_rock_golden" }
+        else if name.hasPrefix("road_") { material = "\(name)_golden" }
+        else { material = name }
+        let replacement = material == name ? nil : UIImage(named: material)
+        let cacheKey = replacement == nil ? name : material
+        textureKeys[name] = cacheKey
+        if let cached = textures[cacheKey] { return cached }
+        guard let image = replacement ?? UIImage(named: name) else { return nil }
         let texture = SKTexture(image: image)
-        texture.filteringMode = .nearest
-        textures[name] = texture
+        texture.filteringMode = replacement == nil ? .nearest : .linear
+        textures[cacheKey] = texture
         return texture
     }
 

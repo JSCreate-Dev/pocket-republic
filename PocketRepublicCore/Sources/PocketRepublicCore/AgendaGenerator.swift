@@ -223,7 +223,7 @@ public enum AgendaGenerator {
 
     static func decrees(_ s: inout RepublicState) -> [AgendaItem] {
         var out: [AgendaItem] = []
-        for spec in DecreeCatalogue.all where spec.cost <= s.treasury {
+        for spec in DecreeCatalogue.all where DecreeCatalogue.unavailableReason(for: spec, in: s) == nil {
             var enact = spec.effect
             enact.treasuryCost = spec.cost
             out.append(AgendaItem(

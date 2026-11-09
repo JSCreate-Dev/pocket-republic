@@ -141,6 +141,32 @@ final class WalkerRoutineTests: XCTestCase {
         XCTAssertEqual(before, state.stateHash())
     }
 
+    func testActivityChangesAtDepartureAndArrival() throws {
+        let (state, citizen) = try employedShopper()
+        let routine = WalkerRoutine.plan(for: citizen, in: state, access: state.buildingAccess())
+        XCTAssertEqual(routine.activity(atHour: 0), .staying(.home))
+        XCTAssertEqual(routine.activity(atHour: Double(routine.dwellEnd[0]) - 0.01), .staying(.home))
+        XCTAssertEqual(routine.activity(atHour: Double(routine.dwellEnd[0])), .traveling(to: routine.stops[1]))
+        XCTAssertEqual(routine.activity(atHour: Double(routine.dwellStart[1])), .staying(routine.stops[1]))
+        XCTAssertEqual(routine.activity(atHour: 23.99), .staying(.home))
+    }
+
+    func testActivityRejectsInvalidHoursAndEmptyRoutines() throws {
+        let (state, citizen) = try employedShopper()
+        let routine = WalkerRoutine.plan(for: citizen, in: state, access: state.buildingAccess())
+        for hour in [Double.nan, .infinity, -1, 24] { XCTAssertNil(routine.activity(atHour: hour)) }
+        var empty = routine
+        empty.stops = []
+        XCTAssertNil(empty.activity(atHour: 12))
+    }
+
+    func testActivityDoesNotCallAnUnreachableLegWalking() throws {
+        let (state, citizen) = try employedShopper()
+        var routine = WalkerRoutine.plan(for: citizen, in: state, access: state.buildingAccess())
+        routine.legPaths[0] = [routine.entrances[0]]
+        XCTAssertNil(routine.activity(atHour: Double(routine.dwellEnd[0])))
+    }
+
     private func employedShopper() throws -> (RepublicState, Citizen) {
         var state = WorldGenerator.generate(seed: 3, citizenCount: 80)
         SimulationEngine.rebuildSpatialCaches(&state)

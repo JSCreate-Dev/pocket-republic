@@ -4,6 +4,9 @@ import Foundation
 /// Balance is data, not code: the design lead tunes this struct without touching
 /// engine logic, and a config can be serialised next to a seed to reproduce a run.
 public struct BalanceConfig: Codable, Sendable, Equatable {
+    /// Optional so unchanged old saves retain their encoded content/hash.
+    public var decreeCooldownDays: Int32? = nil
+    public var effectiveDecreeCooldownDays: Int32 { max(1, decreeCooldownDays ?? 3) }
     /// Missing on older saves and explicit population fixtures: no automatic arrivals.
     public var settlementGrowth: SettlementGrowthConfig? = nil
 

@@ -39,7 +39,7 @@ enum BuildingSpriteCatalog {
         case .townHall:
             return BuildingSpriteSpec(artTilesWide: 3, artTilesDeep: 3,
                                       pointSize: CGSize(width: 192, height: 222),
-                                      imageName: "building_townHall")
+                                      imageName: UIImage(named: "building_townHall_golden") == nil ? "building_townHall" : "building_townHall_golden")
         case .house:
             return BuildingSpriteSpec(artTilesWide: 2, artTilesDeep: 2,
                                       pointSize: CGSize(width: 128, height: 125),
@@ -47,7 +47,7 @@ enum BuildingSpriteCatalog {
         case .police:
             return BuildingSpriteSpec(artTilesWide: 2, artTilesDeep: 2,
                                       pointSize: CGSize(width: 128, height: 114),
-                                      imageName: "building_police")
+                                      imageName: UIImage(named: "building_police_golden") == nil ? "building_police" : "building_police_golden")
         case .market:
             return BuildingSpriteSpec(artTilesWide: 3, artTilesDeep: 2,
                                       pointSize: CGSize(width: 160, height: 123),
@@ -59,19 +59,19 @@ enum BuildingSpriteCatalog {
         case .farm:
             return BuildingSpriteSpec(artTilesWide: 3, artTilesDeep: 3,
                                       pointSize: CGSize(width: 192, height: 154),
-                                      imageName: "building_farm")
+                                      imageName: UIImage(named: "building_farm_golden") == nil ? "building_farm" : "building_farm_golden")
         case .clinic:
             return BuildingSpriteSpec(artTilesWide: 3, artTilesDeep: 3,
                                       pointSize: CGSize(width: 192, height: 185),
-                                      imageName: "building_clinic")
+                                      imageName: UIImage(named: "building_clinic_golden") == nil ? "building_clinic" : "building_clinic_golden")
         case .school:
             return BuildingSpriteSpec(artTilesWide: 3, artTilesDeep: 3,
                                       pointSize: CGSize(width: 192, height: 206),
-                                      imageName: "building_school")
+                                      imageName: UIImage(named: "building_school_golden") == nil ? "building_school" : "building_school_golden")
         case .dock:
             return BuildingSpriteSpec(artTilesWide: 2, artTilesDeep: 3,
                                       pointSize: CGSize(width: 160, height: 140),
-                                      imageName: "building_dock")
+                                      imageName: UIImage(named: "building_dock_golden") == nil ? "building_dock" : "building_dock_golden")
         }
     }
 }
