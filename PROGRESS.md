@@ -12,15 +12,13 @@ Jordan wants Pocket Republic to feel like a lively, living world with a real gam
 
 ## Current state
 
-**First-minute experience and living-world presentation.** A fresh-island opening is a three-beat in-engine camera tour (up to 7.5s automatically), with Skip/Continue, saved per-island seen preference and an opt-out/replay in Island Journal. It holds only the economic clock, preserves the selected pace, restores the camera and releases on skip, completion, leaving, backgrounding, blocking decisions, save errors or new islands. Reduce Motion uses static framing; VoiceOver skips automatic timed presentation and manual replay uses explicit Continue. Folded side/control panes get their own caption layout instead of text across a hinge.
+**Launch, Continue and recovery.** StateObject creation no longer decodes a city or generates a full island before the first UI. A branded dark-ocean welcome uses actual golden building assets, responsive sizing and real checking/preparing/saving/map-opening stages, not fabricated percentages or a timed splash. Saved day/population/treasury/date lead into Continue; the economic clock remains held until the island's first prepared frame. A map-opening Back action invalidates stale readiness callbacks. The founding tour starts only after scene readiness, so a slow load cannot consume its first captions. Continue/backup recovery are available before play; no offline catch-up is added.
 
-**Island Journal** shows suggested next actions, real progress and the last six observed day results. Goals account for 13 starting job slots versus 16 residents, pending construction, automatic hiring, food, housing, happiness, arrival readiness and legacy saves. Day results show real net treasury/food/population/happiness changes and new openings; orders are included, not mislabeled as profit. Optional reading never holds the clock; goal actions are queued until sheet dismissal and revalidated. Journal summaries are session-local; Gazette retains the actual event log.
+**Safer saves.** The existing spatial-v1.json/version-1/checksum format and prototype key remain. Structural validation precedes checksum/ledger acceptance. New City writes successfully before publishing or replacing the live selection; it never deletes the old primary first. Normal saves keep one verified rolling backup; unchanged saves do not erase an older recovery point. Failed writes pause play and expose Retry Save for the current in-memory city. Failed reads preserve the file and cannot save the boot placeholder. Retry Load and an explicitly confirmed verified backup restore are separate actions; restore preserves the current file and does not rotate it over the chosen recovery point. Invalid primary/backup bytes are preserved before deliberate replacement. Same-seed restore/reload gets a fresh UI session so selections, map scene and journal do not carry over from the later state.
 
-**New animation:** small cached workshop smoke for standing staffed businesses and a short finite completion ripple. Diagnostics and Reduce Motion suppress them; live Reduce Motion also stops decorative construction pops/dust/crew and camera movement. New-island reset now clears old build/road sessions, selected decisions and queued journal actions. No generated movie, voice track, music or new directional art is claimed.
+**Retained gameplay/presentation.** All previous tutorial/faction/decree, local rehousing/missed-meal fixes, shared newcomer capacity planning, actionable roof/resident notices, golden art/terrain/water, precision placement, automatic days/lighting, progression and journal work remain. The new screen reuses the installed art family; no generated movie or new asset import is claimed. This is one current city and one rolling recovery point, not multiple named slots, cloud save or prototype migration.
 
-**Verification:** Swift 6.2 release **174 core tests, zero failures, 8.192s**. Actual extracted tour policy passes start/seen/disabled/blocked/three-beat/duplicate-start/skip/cancel/restart/hold tests. All app Swift syntax, real decree-model compile checks, clock/light policy harnesses, 27 building and 63 material checks, and whitespace pass. Xcode/UIKit/SpriteKit typechecking, camera/particle appearance, real touch/fold/Dynamic Type/VoiceOver behavior and frame rate remain unverified; Claude/device checks are required.
-
-All earlier pending work is retained: nine golden finished-building kinds, terrain/water/road art, automatic days/lighting, explained standing decrees/cooldowns, precision placement, overlays/roadmap, citizen selection/routes and actionable roof markers. No new game-state save fields, grants, RNG draws or economic rules in this round. Remote tested integration was 2741dbe at review; source handoff builds on the exact previous Art and Living World tree.
+**Validation and limits.** The core source is unchanged from the **193 passing release tests** in the prior handoff. A new check compiles/runs the actual Game and Foundation file boundary with a minimal Combine property-wrapper shim: launch guard, codec/checksum/structure, real temp-file backup/no-op behavior, explicit restore/session reset, corrupt/missing-file preservation, failed replacement, in-memory retry and first-launch idempotence pass. App syntax, existing real model/policy harnesses, 27 building PNG and 63 material checks pass. That does not test actual Combine publication, SwiftUI, SpriteKit, Apple SDK typechecking, physical first-frame timing or phone layouts. Claude must Xcode-build and device-test. Autosaves remain ordered/synchronous after accepted actions, so device profiling must check save-time stutter. No IPA, push or main merge is claimed.
 
 ## Spec that is not built
 
@@ -41,7 +39,7 @@ Footprints and tap-to-inspect are on main. PR #17 replaced the shuttling dots wi
 
 - The latest combined source still needs a real Xcode/phone build. Previous successful IPA checks do not validate these new views, camera tour or emitters.
 - Fixed-angle sprites and unrotated footprints remain. True view/building rotation needs directional art, projection/hit-test/depth/road-mask work and saved rectangular orientation.
-- Citizen animation and the light cycle remain visual clocks, separate from six-second economic ticks. Routes are planned trips, not a traffic/commute economy.
+- Citizen animation and the light cycle remain visual clocks, separate from six-second economic ticks. Walk plans refresh at visual midnight (up to one 48-second visual cycle later), not at each economic update. Blocked walks can temporarily disappear until then. This is not a traffic/commute economy.
 - New maps remain 64×64; the design's 96×96 expansion is not done. Older saves retain their market-distance configuration. Schema 1/2 spatial saves and the old prototype key are not automatically migrated.
 - The journal retains six day summaries for the current visit. Persisted city events are still read through Gazette, not a new report database.
 - The full citizen-mind/on-device narrator spec and fuller event deck are not implemented. Progression remains the existing four-node roadmap/season arc; the new goals explain it rather than inventing rewards.
@@ -51,11 +49,11 @@ Footprints and tap-to-inspect are on main. PR #17 replaced the shuttling dots wi
 
 ### Game Designer
 
-Review the first-minute goal order, six-second pacing, optional 7.5s tour and the placement commission that can precede opening. Longer-lived production/trade/district objectives need a concrete balanced design before new mechanics are added.
+Review first-minute goal order, six-second pacing, the final explicit tutorial choice and the placement commission that can precede opening. Longer-lived production/trade/district objectives need a concrete balanced design before new mechanics are added.
 
 ### Game Logic
 
-Keep conservation/determinism and old-save checks green. Remaining depth includes fuller caused events, rare one-offs, citizen minds and future production/trade choices. This pass adds read-only guidance/results, not new economic simulation.
+Keep conservation/determinism and old-save checks green. Remaining depth includes fuller caused events, rare one-offs, citizen minds and future production/trade choices. This round fixes local rehousing/missed-meal recovery and shares admission capacity planning. Future production/trade depth remains scoped separately.
 
 ### Visual And Grapchics
 
@@ -67,7 +65,7 @@ Build/typecheck the combined source and playtest real phone/fold layouts, tour c
 
 ## Next round (priority order)
 
-1. Integrate and build this handoff, then phone-test a fresh island through jobs, housing and the first newcomer wave. Verify old saves and all tour exit paths before calling the presentation finished.
+1. Build the complete launch/save-recovery handoff on f07285d, or select the supplied incremental route after the exact prior handoff. Phone-test cold/warm launch, Continue/frame gate/Back, tutorial timing, real old saves, save failure/retry, backup restore/same-seed reset and New City failure; then recheck housing/growth/notices.
 2. Tune feedback/caption density and goal order from actual play. Validate net changes versus purchases and continued progress without duplicate-project nudges.
 3. Design/test longer-lived production, trade and district choices plus the fuller event deck.
 4. Implement true rotation as a separate art/projection/orientation feature; do not fake it with a screen spin.

@@ -15,6 +15,7 @@ struct DecreeBoard: View {
         VStack(alignment: .leading, spacing: RepublicTheme.Space.lg) {
             standing
             tax
+            FactionCouncilPanel()
             decrees
             council
         }
@@ -173,6 +174,10 @@ struct DecreeBoard: View {
             if let reason = card.availability {
                 Text(reason).font(RepublicTheme.body(.subheadline)).foregroundStyle(RepublicTheme.alert)
             }
+            Text("For your island now").font(RepublicTheme.heading(.subheadline))
+            ForEach(card.context, id: \.self) { line in
+                Text(line).font(RepublicTheme.body(.subheadline)).fixedSize(horizontal: false, vertical: true)
+            }
             Text("Exact effects").font(RepublicTheme.heading(.subheadline))
             if let shortfall = card.shortfall {
                 Text("Need \(shortfall) more")
@@ -182,7 +187,7 @@ struct DecreeBoard: View {
             if !card.chips.isEmpty {
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 128), alignment: .leading)], alignment: .leading, spacing: RepublicTheme.Space.xs) {
                     ForEach(card.chips) { chip in
-                        Text(chip.label)
+                        Text("\(chip.label) · \(chip.projection)")
                             .font(RepublicTheme.body(.caption).weight(.semibold))
                             .foregroundStyle(chip.pleased ? RepublicTheme.fertile : RepublicTheme.alert)
                     }
@@ -246,6 +251,7 @@ struct DecreeCardReading: Identifiable {
         var name: String
         var delta: Int32
         var arrows: String
+        var projection: String
         var id: String { name }
         var pleased: Bool { delta > 0 }
         var label: String { "\(name) \(arrows)" }
@@ -261,6 +267,7 @@ struct DecreeCardReading: Identifiable {
     var canAfford: Bool
     var chips: [Chip]
     var effects: [String]
+    var context: [String]
     var id: String { title }
     var canIssue: Bool { canAfford && availability == nil }
     var chipSummary: String? {
@@ -281,8 +288,9 @@ struct DecreeCardReading: Identifiable {
             costLabel: pay == 0 ? "Free" : "$\(pay)",
             shortfall: shortfall,
             canAfford: shortfall == nil,
-            chips: chips(factions: spec.effect.favorFactions, deltas: spec.effect.favorDeltas),
-            effects: AgendaEffectCopy.lines(spec.effect).map { $0 == "Clears neglect in the district" ? "Clears neglect in every district" : $0 }
+            chips: chips(factions: spec.effect.favorFactions, deltas: spec.effect.favorDeltas, state: state),
+            effects: AgendaEffectCopy.lines(spec.effect).map { $0 == "Clears neglect in the district" ? "Clears neglect in every district" : $0 },
+            context: context(spec, state: state)
         )
     }
 
@@ -318,12 +326,43 @@ struct DecreeCardReading: Identifiable {
                 "This is not a recurring festival and does not directly refill markets or raise every citizen's happiness.")
     }
 
-    private static func chips(factions: [FactionKind], deltas: [Int32]) -> [Chip] {
+    private static func context(_ spec: DecreeSpec, state: RepublicState) -> [String] {
+        let cost = max(spec.cost, spec.effect.treasuryCost)
+        var lines = [cost <= state.treasury
+            ? "Treasury after the upfront cost: $\(state.treasury - cost). Future wages and taxes are separate."
+            : "Treasury $\(state.treasury); upfront shortfall $\(cost - state.treasury)."]
+        let living = state.citizens.filter(\.alive)
+        if spec.effect.foodImport > 0 {
+            let hungry = living.filter { $0.daysHungry > 0 }.count
+            let stock = state.buildings.filter { $0.kind == .market && $0.isStanding(on: state.map) }
+                .reduce(Int64(0)) { $0 + Int64($1.foodStore) }
+            lines.append("\(hungry) residents are hungry; standing markets hold \(stock) food. Delivery adds stock, not free meals or new market coverage.")
+        }
+        if spec.effect.civicWageDelta != 0 {
+            let workers = living.filter { $0.work != nil && FactionKind.of($0.occupation) == .officials }.count
+            lines.append("\(workers) currently employed civic workers: up to $\(Int64(workers) * spec.effect.civicWageDelta) additional payroll per paid day at today's staffing. Staffing and treasury can change.")
+        }
+        if spec.effect.districtUnrest != 0 {
+            lines.append("Highest district unrest: \(state.districts.map(\.unrest).max() ?? 0)%. Lower unrest does not directly refill food stores, create jobs or raise every resident's happiness.")
+        }
+        if spec.effect.corruption < 0 {
+            lines.append("Corruption now: \(state.corruption)%. This measure lowers it once; the underlying pressures can remain.")
+        }
+        if spec.effect.incomeTaxDelta != 0 {
+            lines.append("Future tax receipts depend on actual taxable earnings. A three-point rate change is not a guaranteed dollar amount.")
+        }
+        return lines
+    }
+
+    private static func chips(factions: [FactionKind], deltas: [Int32], state: RepublicState) -> [Chip] {
         let count = min(factions.count, deltas.count)
         return (0..<count).compactMap { index in
             let delta = deltas[index]
             guard delta != 0 else { return nil }
-            return Chip(name: factions[index].displayName, delta: delta, arrows: arrows(delta))
+            let current = state.factions.first { $0.kind == factions[index] }?.favor ?? 0
+            let next = max(-100, min(100, current + delta))
+            return Chip(name: factions[index].displayName, delta: delta, arrows: arrows(delta),
+                        projection: "Approval \(current) → \(next)")
         }.sorted { lhs, rhs in
             if lhs.pleased != rhs.pleased { return lhs.pleased }
             return abs(lhs.delta) > abs(rhs.delta)
@@ -427,6 +466,116 @@ struct DevelopmentRoadmap: View {
             .padding(10)
             .background(RepublicTheme.ink.opacity(node.unlocked ? 0.04 : 0.07),
                         in: RoundedRectangle(cornerRadius: 12))
+        }
+    }
+}
+
+/// Political state is explained beside the powers that can change it.
+private struct FactionCouncilPanel: View {
+    @EnvironmentObject private var game: Game
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Label("People behind the politics", systemImage: "person.3.fill")
+                .font(RepublicTheme.heading(.title3))
+            Text("A faction follows a resident's occupation. Membership can change when someone gets a new job. Approval remembers government decisions (−100 to +100); happiness is wellbeing and loyalty is personal allegiance (0–100). Buying approval alone does not fix hunger or unemployment.")
+                .font(.subheadline).foregroundStyle(RepublicTheme.inkSoft)
+            ForEach(FactionKind.allCases, id: \.rawValue) { kind in
+                faction(kind)
+            }
+        }.dioramaCard()
+    }
+
+    private func faction(_ kind: FactionKind) -> some View {
+        let report = FactionReport(kind: kind, state: game.state)
+        return DisclosureGroup {
+            VStack(alignment: .leading, spacing: 10) {
+                Text(membership(kind)).font(.subheadline)
+                if report.members == 0 {
+                    Text("No current members. Political memory remains even when membership changes.")
+                        .font(.caption).foregroundStyle(RepublicTheme.inkSoft)
+                } else {
+                    Text("Happiness \(report.happiness)% · Loyalty \(report.loyalty)%")
+                        .font(.subheadline.monospacedDigit())
+                    if let concern = report.concern {
+                        Text("Last daily report: \(concernTitle(concern)) · \(report.concernPercent)% of members at that update.")
+                            .font(.subheadline.weight(.semibold))
+                        Text(advice(concern)).font(.subheadline)
+                    } else {
+                        Text(game.state.day == 0 ? "The first daily update will report shared grievances." : "No dominant concern recorded at the last daily update. Individuals may still have unmet needs.")
+                            .font(.caption).foregroundStyle(RepublicTheme.inkSoft)
+                    }
+                }
+                ForEach(report.demands) { demand in
+                    VStack(alignment: .leading, spacing: 4) {
+                        Label("Active demand · see Before the council below", systemImage: "exclamationmark.bubble")
+                        if let deadline = demand.expiresOnDay {
+                            Text("Expires after Day \(deadline). Ignoring it costs \(demand.ignoreCost) approval when it lapses.")
+                        }
+                        Text(demand.causes.map { concernTitle($0.kind) }.joined(separator: " · "))
+                    }.font(.caption).foregroundStyle(RepublicTheme.alert)
+                }
+                if !report.memory.isEmpty {
+                    Text("Recent government memory").font(.caption.weight(.bold))
+                    ForEach(report.memory.indices, id: \.self) { index in
+                        let act = report.memory[index]
+                        Text("Day \(act.day) · \(act.delta >= 0 ? "+" : "")\(act.delta) approval · \(act.detail == "decision" ? "Government decision" : act.detail)")
+                            .font(.caption).fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+            }.padding(.top, 8)
+        } label: {
+            VStack(alignment: .leading, spacing: 3) {
+                Text("\(kind.displayName) · \(report.members) residents").font(.headline)
+                Text("Approval \(report.favor)\(report.demands.isEmpty ? "" : " · Demand waiting")")
+                    .font(.caption.monospacedDigit()).foregroundStyle(RepublicTheme.inkSoft)
+            }.padding(.vertical, 8)
+        }
+    }
+
+    private func membership(_ kind: FactionKind) -> String {
+        switch kind {
+        case .labourers: return "Farmers, dockhands and artisans. These are the island's food, trade and workshop crews."
+        case .merchants: return "Shopkeepers. They operate the markets that link producers with households."
+        case .officials: return "Clerks, officers, teachers and nurses. Civic wages come from the treasury."
+        case .landless: return "Residents with the unemployed occupation. The name is political: it does not necessarily mean they have no home."
+        }
+    }
+
+    private func concernTitle(_ cause: CauseKind) -> String {
+        switch cause {
+        case .foodShortage: return "Hunger"
+        case .unemployment: return "Not enough work"
+        case .poverty: return "Low household cash"
+        case .taxBurden: return "Tax pressure"
+        case .corruption: return "Corruption"
+        case .noMarketAccess: return "Market access"
+        case .noClinicAccess: return "Clinic access"
+        case .noPoliceAccess: return "Police access"
+        case .treasuryDeficit: return "Treasury pressure"
+        case .districtNeglect: return "District neglect"
+        case .policyChange: return "Government policy"
+        case .islandEvent: return "Island event"
+        }
+    }
+
+    private func advice(_ cause: CauseKind) -> String {
+        switch cause {
+        case .foodShortage, .noMarketAccess:
+            return "Check Food Access, market stock and residents' cash. Importing food helps stock; it cannot bridge a disconnected road or pay a household's bill."
+        case .unemployment:
+            return "Inspect vacancies and road access. Connected standing workplaces hire automatically on daily updates; sites cannot employ residents yet."
+        case .poverty:
+            return "Inspect residents' jobs and cash. A full treasury does not mean households can afford meals."
+        case .taxBurden:
+            return "Compare the lasting income-tax rate with payroll needs before cutting it. Relief can reduce future revenue."
+        case .noClinicAccess, .noPoliceAccess:
+            return "Check the service overlay, staffing and connected roads. A nearby foundation is not an operating service."
+        case .corruption:
+            return "Review corruption and the anti-graft decree. Its one-time improvement also costs money and Officials' approval."
+        case .districtNeglect:
+            return "Review district conditions and public works. Clearing neglect once does not build or staff new services."
+        default: return "Read the demand's causes and each option's effects before making a promise. Addressing approval and addressing living conditions are different choices."
         }
     }
 }

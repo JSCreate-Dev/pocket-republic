@@ -176,21 +176,34 @@ public enum WalkerRoutine {
             stops.append(stop)
             doors.append(door)
         }
-        if let work = citizen.work, state.buildings[Int(work.raw)].isStanding(on: state.map),
-           let door = access.entrance(of: work) {
-            append(.work, door: door)
+        func shop() {
+            let homeTile = state.buildings[Int(home.raw)].tile
+            if let market = SimulationEngine.shoppingMarket(state, homeTile: homeTile),
+               let door = access.entrance(of: market) { append(.market, door: door) }
         }
-        let homeTile = state.buildings[Int(home.raw)].tile
-        if let market = SimulationEngine.shoppingMarket(state, homeTile: homeTile),
-           let door = access.entrance(of: market) {
-            append(.market, door: door)
-        }
+        // Food urgency changes the order of the day, not consumption or wages.
+        // A shop visit is an attempt: it never claims food was bought or hunger cured.
+        if citizen.daysHungry > 0 { shop() }
+        if let work = citizen.work, Int(work.raw) >= 0, Int(work.raw) < state.buildings.count,
+           state.buildings[Int(work.raw)].isStanding(on: state.map),
+           let door = access.entrance(of: work) { append(.work, door: door) }
+        if citizen.daysHungry == 0 { shop() }
         // Purposeful extra trips. Older residents visit a clinic periodically;
         // discontented residents gather at the hall; others sometimes socialise.
         // The seed/identity/day offset varies the day without consuming saved RNG.
         let phase = (UInt64(citizen.id.raw) &+ state.worldSeed &+ UInt64(max(0, state.day))) % 5
         let visit: (BuildingKind, DailyRoutine.Stop)?
-        if citizen.age >= 55 && phase == 0 { visit = (.clinic, .clinic) }
+        let hasDemand = state.agenda.contains {
+            $0.kind == .factionDemand && $0.faction == FactionKind.of(citizen.occupation)
+                && $0.isLive(on: state.day)
+        }
+        let festival = state.decreeLastIssued?["Proclaim a market festival"].map {
+            state.day >= $0 && state.day - $0 <= 1
+        } ?? false
+        if citizen.daysHungry > 0 { visit = nil }
+        else if hasDemand && phase < 3 { visit = (.townHall, .civic) }
+        else if citizen.age >= 55 && phase == 0 { visit = (.clinic, .clinic) }
+        else if festival && phase < 4 { visit = (.market, .leisure) }
         else if citizen.loyalty < 30 && phase < 2 { visit = (.townHall, .civic) }
         else if citizen.daysHungry == 0 && phase == 2 { visit = (.market, .leisure) }
         else { visit = nil }
@@ -216,7 +229,7 @@ public enum WalkerRoutine {
         stops.append(.home)
         doors.append(homeDoor)
 
-        let (dwellStart, dwellEnd) = dwells(for: stops, citizen: citizen, day: state.day)
+        let (dwellStart, dwellEnd) = dwells(for: stops, citizen: citizen, day: state.day, festival: festival && phase < 4 && citizen.daysHungry == 0)
         var legs: [[TileIndex]] = []
         var full: [TileIndex] = []
         for i in 1..<doors.count {
@@ -236,7 +249,12 @@ public enum WalkerRoutine {
 
     /// Different occupations start at different hours. Individual and daily
     /// offsets keep the town from moving in lockstep; all gaps remain travel.
-    static func dwells(for stops: [DailyRoutine.Stop], citizen: Citizen, day: Int32) -> (start: [Int], end: [Int]) {
+    static func dwells(for stops: [DailyRoutine.Stop], citizen: Citizen, day: Int32, festival: Bool = false) -> (start: [Int], end: [Int]) {
+        // An urgent food errand precedes a shorter working day. Each dwell has
+        // a positive travel gap; no backward or overlapping timetable intervals.
+        if let market = stops.firstIndex(of: .market), let work = stops.firstIndex(of: .work), market < work {
+            return ([0, 6, 9, 20], [5, 7, 17, 24])
+        }
         let hasWork = stops.contains(.work)
         let hasVisit = stops.contains(.clinic) || stops.contains(.civic) || stops.contains(.leisure)
         let shift = Int((Int64(citizen.id.raw) + Int64(max(0, day))) % 3) - 1
@@ -261,6 +279,30 @@ public enum WalkerRoutine {
                 end.append(24)
             }
         }
+        if festival, let market = stops.firstIndex(of: .market), market + 1 < start.count {
+            // A funded festival keeps shoppers in the square a little longer.
+            // Do not invent a second trip to the same door or promise happiness.
+            end[market] = min(start[market + 1] - 1, end[market] + 1)
+        }
         return (start, end)
+    }
+}
+
+/// Unsaved presentation time. Economic day ticks must not reset a walker in
+/// mid-route. Background gaps are clamped, so resuming cannot skip a whole walk.
+public struct WalkerPresentationClock: Sendable {
+    public private(set) var elapsed: Double = 10 // dawn, before the first departures
+    private var previousFrame: Double?
+    public static let dayLength: Double = 48
+    public init() {}
+    public mutating func reset() { self = Self() }
+    /// True only on a visual midnight, when all valid routines are home.
+    public mutating func advance(frame: Double, reducedMotion: Bool) -> Bool {
+        guard frame.isFinite else { return false }
+        defer { previousFrame = frame }
+        guard let previousFrame, !reducedMotion else { return false }
+        let before = Int(elapsed / Self.dayLength)
+        elapsed += min(0.1, max(0, frame - previousFrame))
+        return Int(elapsed / Self.dayLength) != before
     }
 }

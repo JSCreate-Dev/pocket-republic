@@ -8,8 +8,15 @@ final class IslandScene: SKScene {
     var onCitizenTap: ((CitizenID) -> Void)?
     var onCitizenActivity: ((CitizenID, String) -> Void)?
     private let citizenRouteLayer = SKNode()
+    var onFirstFrame: (() -> Void)?
+    private var reportedFirstFrame = false
     private let attentionLayer = SKNode()
     private var attentionNodes: [BuildingID: SKNode] = [:]
+    private var citizenNotices: [CitizenID: CitizenAttention] = [:]
+    private var citizenNoticeNodes: [CitizenID: SKNode] = [:]
+    private var noticeTextures: [String: SKTexture] = [:]
+    private var lastNoticeSelection: TimeInterval = -.infinity
+    private var noticesVisible = true
     private var selectedCitizenID: CitizenID?
     private var lastCitizenActivityTime: TimeInterval = -.infinity
     private var lastCitizenActivity = ""
@@ -46,6 +53,8 @@ final class IslandScene: SKScene {
     private var citizenNodes: [CitizenID: SKSpriteNode] = [:]
     private var visibleCitizenIDs: [CitizenID] = []
     private var routines: [CitizenID: DailyRoutine] = [:]
+    private var walkingClock = WalkerPresentationClock()
+    private var interruptedWalks: Set<CitizenID> = []
     private var walkerFacing: [CitizenID: WalkerFacing] = [:]
     private var decoNodes: [Int32: SKSpriteNode] = [:]
     private let reachLayer = SKNode()
@@ -167,8 +176,13 @@ final class IslandScene: SKScene {
 
     func render(_ state: RepublicState) {
         if let old = renderedState,
-           old.day != state.day || old.map.road != state.map.road || old.map.buildingAt != state.map.buildingAt {
-            routines.removeAll()
+           old.map.road != state.map.road || old.map.buildingAt != state.map.buildingAt {
+            let access = state.buildingAccess()
+            for (id, routine) in routines where !routine.path.allSatisfy({ access.isPassable($0) }) {
+                // Never walk through a newly blocked footprint or teleport onto
+                // a replacement route mid-stride. Resume at the next visual dawn.
+                interruptedWalks.insert(id)
+            }
         }
         if presentedSeed != state.worldSeed {
             endTourCamera()
@@ -177,15 +191,21 @@ final class IslandScene: SKScene {
             citizenRouteLayer.removeAllChildren()
             attentionLayer.removeAllChildren()
             attentionNodes.removeAll()
+            citizenNoticeNodes.removeAll()
+            lastNoticeSelection = -.infinity
             lightingElapsed = 0
             previousLightingFrame = nil
             previousLightingUpdate = -.infinity
             routines.removeAll()
             selectedBuildingID = nil
+            walkingClock.reset()
+            interruptedWalks.removeAll()
             presentedSeed = state.worldSeed
             cameraInitialized = false
             cameraUserAdjusted = false
         }
+        citizenNotices = CitizenNeeds.notices(in: state)
+        lastNoticeSelection = -.infinity
         noteConstruction(in: state)
         renderedState = state
         overlaySnapshot = overlayMode == .standard ? nil : MapOverlaySnapshot(mode: overlayMode, state: state)
@@ -973,7 +993,12 @@ final class IslandScene: SKScene {
     private func updateMapDecorationVisibility() {
         let hidden = overlayMode != .standard || placementKind != nil || roadDrawing
         citizenRouteLayer.isHidden = hidden
-        attentionLayer.isHidden = hidden
+        attentionLayer.isHidden = hidden || !noticesVisible
+    }
+
+    func setNoticesVisible(_ visible: Bool) {
+        noticesVisible = visible
+        updateMapDecorationVisibility()
     }
 
     private func refreshCitizenRoute() {
@@ -991,6 +1016,7 @@ final class IslandScene: SKScene {
         }
         guard let id = selectedCitizenID, let state = renderedState,
               id.raw >= 0, Int(id.raw) < state.citizens.count, state.citizens[Int(id.raw)].alive else { return }
+        guard !interruptedWalks.contains(id) else { return }
         let routine = self.routine(for: state.citizens[Int(id.raw)], in: state, access: state.buildingAccess())
         guard let first = routine.path.first else { return }
         let path = CGMutablePath()
@@ -1007,14 +1033,14 @@ final class IslandScene: SKScene {
         guard time - lastCitizenActivityTime >= 0.5, let id = selectedCitizenID,
               let routine = routines[id] else { return }
         lastCitizenActivityTime = time
-        let hour = (time + walkerPhase(for: id)).truncatingRemainder(dividingBy: MapArt.visualDay) / MapArt.secondsPerHour
+        let hour = (walkingClock.elapsed + walkerPhase(for: id)).truncatingRemainder(dividingBy: MapArt.visualDay) / MapArt.secondsPerHour
         let names: [DailyRoutine.Stop: String] = [.home: "home", .work: "work", .market: "the market",
             .clinic: "the clinic", .civic: "the civic hall", .leisure: "a social visit"]
         let activity: String
-        switch routine.activity(atHour: hour) {
+        switch interruptedWalks.contains(id) ? nil : routine.activity(atHour: hour) {
         case .staying(let stop): activity = stop == .leisure ? "Social visit" : "At \(names[stop] ?? stop.rawValue)"
         case .traveling(let stop): activity = "Walking to \(names[stop] ?? stop.rawValue)"
-        case nil: activity = "No reachable trip scheduled"
+        case nil: activity = interruptedWalks.contains(id) ? "Route interrupted · replanning at dawn" : "No reachable trip scheduled"
         }
         if activity != lastCitizenActivity {
             lastCitizenActivity = activity
@@ -1023,11 +1049,25 @@ final class IslandScene: SKScene {
     }
 
     private func refreshAttention(state: RepublicState) {
-        let candidates = siteLayouts.keys.compactMap { id -> (BuildingID, BuildingAttention, CGFloat)? in
+        let ranked = siteLayouts.keys.compactMap { id -> (BuildingID, BuildingAttention, CGFloat)? in
             guard let issue = BuildingInspector.attention(id: id, in: state), let layout = siteLayouts[id] else { return nil }
             let point = layout.southCorner(halfWidth: halfWidth, halfHeight: halfHeight)
             return (id, issue, hypot(point.x - cameraNode.position.x, point.y - cameraNode.position.y))
-        }.sorted { $0.2 == $1.2 ? $0.0 < $1.0 : $0.2 < $1.2 }.prefix(12)
+        }.sorted {
+            let left = noticePriority($0.1.kind), right = noticePriority($1.1.kind)
+            if left != right { return left < right }
+            return $0.2 == $1.2 ? $0.0 < $1.0 : $0.2 < $1.2
+        }
+        var candidates: [(BuildingID, BuildingAttention, CGFloat)] = []
+        var used: [CGPoint] = []
+        for candidate in ranked {
+            guard candidates.count < 12 else { break }
+            let position = buildingNoticePosition(candidate.0, state: state)
+            let screen = cameraNode.convert(position, from: self)
+            guard abs(screen.x) <= max(0, size.width / 2 - 22), abs(screen.y) <= max(0, size.height / 2 - 22) else { continue }
+            guard used.allSatisfy({ hypot($0.x - screen.x, $0.y - screen.y) >= 28 }) else { continue }
+            used.append(screen); candidates.append(candidate)
+        }
         let wanted = Set(candidates.map { $0.0 })
         for id in Array(attentionNodes.keys) where !wanted.contains(id) {
             attentionNodes.removeValue(forKey: id)?.removeFromParent()
@@ -1041,19 +1081,100 @@ final class IslandScene: SKScene {
                 badge.fillColor = UIColor(red: 0.12, green: 0.15, blue: 0.13, alpha: 0.96)
                 badge.strokeColor = UIColor(red: 0.92, green: 0.68, blue: 0.24, alpha: 1)
                 badge.lineWidth = 1.5
-                let symbol = issue.kind == .food ? "fork.knife" : (issue.kind == .road ? "link" : "person.fill.questionmark")
-                if let image = UIImage(systemName: symbol)?.withTintColor(.white, renderingMode: .alwaysOriginal) {
-                    badge.addChild(SKSpriteNode(texture: SKTexture(image: image), size: CGSize(width: 14, height: 14)))
+                let symbol: String
+                switch issue.kind {
+                case .food: symbol = "fork.knife"
+                case .road: symbol = "link"
+                case .staff: symbol = "person.fill.questionmark"
+                case .construction: symbol = "hammer.fill"
+                case .opened: symbol = "checkmark.seal.fill"
+                }
+                if issue.kind == .opened { badge.strokeColor = .systemGreen }
+                if issue.kind == .construction { badge.strokeColor = .systemTeal }
+                if let texture = noticeTexture(symbol) {
+                    badge.addChild(SKSpriteNode(texture: texture, size: CGSize(width: 14, height: 14)))
                 }
                 badge.name = issue.kind.rawValue
                 attentionLayer.addChild(badge)
                 attentionNodes[id] = badge
                 node = badge
             }
-            guard let layout = siteLayouts[id] else { continue }
-            let building = state.buildings[Int(id.raw)]
-            let base = layout.southCorner(halfWidth: halfWidth, halfHeight: halfHeight)
-            node.position = CGPoint(x: base.x, y: base.y + BuildingSpriteCatalog.spec(for: building.kind).pointSize.height + 10)
+            node.position = buildingNoticePosition(id, state: state)
+            node.setScale(cameraNode.xScale)
+        }
+    }
+
+    private func buildingNoticePosition(_ id: BuildingID, state: RepublicState) -> CGPoint {
+        guard let layout = siteLayouts[id] else { return .zero }
+        let building = state.buildings[Int(id.raw)]
+        let base = layout.southCorner(halfWidth: halfWidth, halfHeight: halfHeight)
+        let height = building.isUnderConstruction ? CGFloat(64) : BuildingSpriteCatalog.spec(for: building.kind).pointSize.height
+        return CGPoint(x: base.x, y: base.y + height + 14 * cameraNode.xScale)
+    }
+
+    private func noticePriority(_ kind: BuildingAttention.Kind) -> Int {
+        switch kind {
+        case .road: return 0
+        case .food: return 1
+        case .staff: return 2
+        case .construction: return 3
+        case .opened: return 4
+        }
+    }
+
+    private func noticeTexture(_ symbol: String) -> SKTexture? {
+        if let cached = noticeTextures[symbol] { return cached }
+        guard let image = UIImage(systemName: symbol)?.withTintColor(.white, renderingMode: .alwaysOriginal) else { return nil }
+        let texture = SKTexture(image: image)
+        noticeTextures[symbol] = texture
+        return texture
+    }
+
+    /// Choose a small non-overlapping set twice per second. No pathfinding or
+    /// state mutation in the frame loop; only badge positions follow walkers.
+    private func updateCitizenNotices(at time: TimeInterval) {
+        guard !attentionLayer.isHidden else { return }
+        if time - lastNoticeSelection >= 0.5 {
+            lastNoticeSelection = time
+            let candidates = visibleCitizenIDs.compactMap { id -> (CitizenID, CitizenAttention, CGFloat)? in
+                guard let issue = citizenNotices[id], let person = citizenNodes[id], person.alpha > 0.05 else { return nil }
+                return (id, issue, hypot(person.position.x - cameraNode.position.x, person.position.y - cameraNode.position.y))
+            }.sorted {
+                if $0.1.priority != $1.1.priority { return $0.1.priority < $1.1.priority }
+                return $0.2 == $1.2 ? $0.0 < $1.0 : $0.2 < $1.2
+            }
+            var occupied = attentionNodes.values.map { $0.convert(CGPoint.zero, to: cameraNode) }
+            var chosen: Set<CitizenID> = []
+            for (id, issue, _) in candidates {
+                guard chosen.count < 6, let person = citizenNodes[id] else { break }
+                let location = CGPoint(x: person.position.x, y: person.position.y + 28 * cameraNode.xScale)
+                let screen = cameraNode.convert(location, from: self)
+                guard abs(screen.x) <= max(0, size.width / 2 - 22), abs(screen.y) <= max(0, size.height / 2 - 22) else { continue }
+                guard occupied.allSatisfy({ hypot($0.x - screen.x, $0.y - screen.y) >= 28 }) else { continue }
+                occupied.append(screen); chosen.insert(id)
+                if citizenNoticeNodes[id]?.name != issue.kind.rawValue {
+                    citizenNoticeNodes.removeValue(forKey: id)?.removeFromParent()
+                    let badge = SKShapeNode(circleOfRadius: 10)
+                    badge.fillColor = UIColor(white: 0.1, alpha: 0.95)
+                    badge.strokeColor = issue.kind == .food ? .systemOrange : .systemYellow
+                    badge.lineWidth = 1.5
+                    let symbol = issue.kind == .food ? "fork.knife" : issue.kind == .housing ? "house.fill" : "briefcase.fill"
+                    if let texture = noticeTexture(symbol) {
+                        badge.addChild(SKSpriteNode(texture: texture, size: CGSize(width: 12, height: 12)))
+                    }
+                    badge.name = issue.kind.rawValue
+                    attentionLayer.addChild(badge); citizenNoticeNodes[id] = badge
+                }
+            }
+            for id in Array(citizenNoticeNodes.keys) where !chosen.contains(id) {
+                citizenNoticeNodes.removeValue(forKey: id)?.removeFromParent()
+            }
+        }
+        for (id, badge) in citizenNoticeNodes {
+            guard let person = citizenNodes[id] else { badge.isHidden = true; continue }
+            badge.isHidden = person.alpha < 0.05 || interruptedWalks.contains(id)
+            badge.position = CGPoint(x: person.position.x, y: person.position.y + 28 * cameraNode.xScale)
+            badge.setScale(cameraNode.xScale)
         }
     }
 
@@ -1064,9 +1185,22 @@ final class IslandScene: SKScene {
         return planned
     }
 
+    override func didFinishUpdate() {
+        guard renderedState != nil, !reportedFirstFrame, let ready = onFirstFrame else { return }
+        reportedFirstFrame = true
+        // Let this prepared frame reach the view before removing the boot cover.
+        DispatchQueue.main.async { ready() }
+    }
+
     override func update(_ currentTime: TimeInterval) {
         guard let state = renderedState else { return }
         animationTime = currentTime
+        if walkingClock.advance(frame: currentTime, reducedMotion: UIAccessibility.isReduceMotionEnabled) {
+            routines.removeAll()
+            interruptedWalks.removeAll()
+            refreshVisible(force: true)
+            refreshCitizenRoute()
+        }
         updateLighting(at: currentTime)
         if cameraNode.action(forKey: "founding-tour") != nil { refreshVisible() }
         stepCrew(time: currentTime)
@@ -1078,14 +1212,16 @@ final class IslandScene: SKScene {
                   let routine = routines[id] else { continue }
             applyWalker(node, citizen: state.citizens[Int(id.raw)], routine: routine, map: map, time: currentTime)
         }
+        updateCitizenNotices(at: currentTime)
     }
 
-    /// One simulated day has no clock of its own. While it stays paused, the scene
-    /// plays `DailyRoutine` across 24 hours at two seconds each and slides the
-    /// sprite along the core path between those hours.
+    /// Daily simulation updates do not replace an in-progress visual route.
+    /// At visual midnight every resident is home, so the next routine can use
+    /// current jobs, hunger and civic events without snapping a walking sprite.
     private func applyWalker(_ node: SKSpriteNode, citizen: Citizen, routine: DailyRoutine,
                              map: WorldMap, time: TimeInterval) {
-        let localTime = time + walkerPhase(for: citizen.id)
+        guard !interruptedWalks.contains(citizen.id) else { node.alpha = 0; return }
+        let localTime = walkingClock.elapsed + walkerPhase(for: citizen.id)
         guard let pose = walkerPose(routine, at: localTime, map: map) else { return }
         node.position = pose.position
         node.zPosition = pose.sort
@@ -1514,6 +1650,17 @@ final class IslandScene: SKScene {
         } else if !roadDrawing && !wasDrag && !wasMulti {
             if placementKind == nil, overlayMode == .standard {
                 let screen = touch.location(in: cameraNode)
+                if !attentionLayer.isHidden {
+                    let peopleNotices = citizenNoticeNodes.compactMap { id, badge -> (CitizenID, CGFloat)? in
+                        guard !badge.isHidden else { return nil }
+                        let point = badge.convert(CGPoint.zero, to: cameraNode)
+                        let distance = hypot(point.x - screen.x, point.y - screen.y)
+                        return distance <= 22 ? (id, distance) : nil
+                    }
+                    if let notice = peopleNotices.min(by: { $0.1 == $1.1 ? $0.0 < $1.0 : $0.1 < $1.1 }) {
+                        tileTick.selectionChanged(); onCitizenTap?(notice.0); return
+                    }
+                }
                 let people = citizenNodes.compactMap { id, node -> (CitizenID, CGFloat)? in
                     guard node.alpha > 0.05, !node.isHidden else { return nil }
                     let point = node.convert(CGPoint(x: 0, y: 8), to: cameraNode)
@@ -1536,7 +1683,7 @@ final class IslandScene: SKScene {
                     let point = node.convert(CGPoint.zero, to: cameraNode)
                     return (id, hypot(point.x - screen.x, point.y - screen.y))
                 }
-                let nearbySigns = signs.filter { $0.1 <= 22 }
+                let nearbySigns = signs.filter { !attentionLayer.isHidden && $0.1 <= 22 }
                 if let sign = nearbySigns.min(by: { $0.1 == $1.1 ? $0.0 < $1.0 : $0.1 < $1.1 }) {
                     tileTick.selectionChanged()
                     onTileTap?(state.buildings[Int(sign.0.raw)].tile)

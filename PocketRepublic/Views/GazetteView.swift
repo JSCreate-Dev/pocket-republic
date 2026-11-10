@@ -187,6 +187,9 @@ enum GazetteReading {
         let headline: String
         let tone: GazetteTone
         switch event.kind {
+        case .citizenHoused:
+            headline = max(count, Int(event.magnitude)) == 1 ? "1 resident found a home" : "\(max(count, Int(event.magnitude))) residents found a home"
+            tone = .good
         case .citizenHungry:
             headline = "\(count) \(count == 1 ? "family" : "families") went hungry\(place)"
             tone = .bad

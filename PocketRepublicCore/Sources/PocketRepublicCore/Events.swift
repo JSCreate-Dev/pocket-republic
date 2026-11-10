@@ -6,6 +6,7 @@ public enum EventKind: String, Codable, Sendable {
     case buildingSiteStarted
     case buildingConstructed
     case buildingAbandoned
+    case citizenHoused
     case citizenHungry
     case citizenEmployed
     case citizenUnemployed

@@ -35,12 +35,13 @@ final class MapAttentionTests: XCTestCase {
         XCTAssertNil(BuildingInspector.attention(id: id, in: state))
     }
 
-    func testConstructionAndDemolishedSitesDoNotWarn() throws {
+    func testConstructionIsInformationalAndDemolishedSitesDoNotWarn() throws {
         var state = WorldGenerator.generate(seed: 44)
         let index = try XCTUnwrap(state.buildings.firstIndex { $0.kind == .workshop })
         let id = state.buildings[index].id
         state.buildings[index].daysRequired = 3
-        XCTAssertNil(BuildingInspector.attention(id: id, in: state))
+        // Construction is now an informational hammer, never a staffing alarm.
+        XCTAssertEqual(BuildingInspector.attention(id: id, in: state)?.kind, .construction)
         _ = SimulationEngine.apply(.demolish(id), to: &state)
         XCTAssertNil(BuildingInspector.attention(id: id, in: state))
         XCTAssertNil(BuildingInspector.attention(id: BuildingID(-1), in: state))

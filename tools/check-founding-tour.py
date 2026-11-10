@@ -23,6 +23,13 @@ for exitBeat in 0..<3 {
     precondition(!policy.active)
     precondition(policy.begin() && policy.beat == 0)
 }
+var auto = FoundingTourPolicy()
+precondition(auto.begin())
+precondition(auto.advanceAutomatically() && auto.beat == 1)
+precondition(auto.advance() && auto.beat == 2)
+precondition(!auto.advanceAutomatically() && auto.active && auto.clockHeld)
+auto.finish()
+precondition(!auto.clockHeld)
 var policy = FoundingTourPolicy()
 precondition(policy.begin())
 precondition(policy.advance() && policy.beat == 1)

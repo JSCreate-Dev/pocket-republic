@@ -20,6 +20,7 @@ public enum SimulationEngine {
         advanceConstruction(&s)
         if s.fields.dirty { rebuildSpatialCaches(&s) }
 
+        assignHomes(&s)
         assignWork(&s)
         admitNewcomers(&s)
         if s.config.settlementGrowth != nil { assignWork(&s) }
@@ -394,7 +395,13 @@ public enum SimulationEngine {
     static func feedCitizens(_ s: inout RepublicState) {
         let need = s.config.foodPerCitizenPerDay
         for i in s.citizens.indices {
-            guard s.citizens[i].alive, let home = s.citizens[i].home else { continue }
+            guard s.citizens[i].alive else { continue }
+            guard let home = s.citizens[i].home else {
+                // Missing shelter is not a successful meal. Keep hunger reports
+                // truthful until the resident can use a household's market route.
+                s.citizens[i].daysHungry += 1
+                continue
+            }
             let homeTile = s.buildings[Int(home.raw)].tile
             // Same door the coverage stats use, so a citizen counted as in range can buy.
             guard let marketID = shoppingMarket(s, homeTile: homeTile) else {
@@ -858,26 +865,9 @@ extension SimulationEngine {
         guard let rules = s.config.settlementGrowth,
               rules.arrivalIntervalDays > 0, s.day > 0,
               s.day % rules.arrivalIntervalDays == 0 else { return }
-        let living = s.citizens.filter { $0.alive }
-        guard !living.isEmpty, living.allSatisfy({ $0.daysHungry == 0 }),
-              living.reduce(Int64(0), { $0 + Int64($1.happiness) }) / Int64(living.count)
-                >= Int64(rules.minimumHappiness) else { return }
-        let openJobs = s.buildings.filter { $0.isStanding(on: s.map) }
-        var vacancies = openJobs.map { max(0, Int($0.kind.workerCapacity) - $0.workers.count) }
         var admitted: [CitizenID] = []
-        for _ in 0..<max(0, rules.arrivalsPerWave) {
-            guard let home = s.buildings.first(where: { house in
-                guard house.kind == .house, house.isStanding(on: s.map),
-                      house.residents.count < Int(house.kind.housingCapacity),
-                      let market = shoppingMarket(s, homeTile: house.tile),
-                      Int64(s.buildings[Int(market.raw)].foodStore) >=
-                        Int64(living.count + admitted.count + 1) * Int64(max(1, rules.foodReserveDays))
-                        * Int64(s.config.foodPerCitizenPerDay) else { return false }
-                return openJobs.indices.contains { vacancies[$0] > 0 && s.fields.areConnected(house.tile, openJobs[$0].tile) }
-            }), let job = openJobs.indices.first(where: {
-                vacancies[$0] > 0 && s.fields.areConnected(home.tile, openJobs[$0].tile)
-            }) else { break }
-            vacancies[job] -= 1
+        for homeID in SettlementAdmissionPlan.homes(in: s) {
+            let home = s.buildings[Int(homeID.raw)]
             let id = CitizenID(s.nextCitizenRaw)
             s.nextCitizenRaw += 1
             // Stable name and temperament from identity/seed, without shifting wellbeing RNG.

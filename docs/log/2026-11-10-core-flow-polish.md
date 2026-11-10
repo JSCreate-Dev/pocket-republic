@@ -1,0 +1,11 @@
+# 2026-11-10 08:57 EST — Game Logic — gameplay/core-flow-polish
+
+Base: exact recovered Tutorial/Factions/Town Flow source tree (previous handoff 301bfce), restored over remote f07285d. The remote has not integrated that prior handoff yet. No main merge or remote push claimed.
+
+- Added deterministic local rehousing after completed construction/cache rebuild and before hiring/arrival. Prefer keeping the commute, then food access, then stable building id. Existing residents take beds first; sites/dead people do not count. Rehousing changes no population, treasury or RNG and emits citizenHoused once per nonempty allocation. Included only the minimal exhaustive Gazette event-case compatibility bridge with this API change.
+- Fixed unhoused residents silently skipping daily meal failure; missed meals now remain visible until shelter/market access recovers. Existing wellbeing formulas are unchanged.
+- Shared SettlementAdmissionPlan between actual waves and forecasts. Readiness prepares a copy with local housing/hiring first, exposes partial-wave capacity and explains jobs/beds reserved for locals. No stale “ready” promise from vacancies current residents still need.
+- Added current citizen notices and batched access preparation, food explanations separating road/stock/cash/last meal, real job-route diagnosis, construction/opening information and prioritised shelter goals. No notice becomes a stored debuff. Day results expose net working-resident and hunger improvements.
+- Verified Swift 6.2 release: 193 tests, zero failures, 6.283 seconds. Twelve new tests cover relocation/capacity, site versus opening, exact partial-wave forecast/admission, save-load replay, ledger invariants, notice cleanup, diagnoses, missed meals and day-result facts. Existing construction marker test intentionally updated: informational hammer is now expected; demolished/invalid ids still have no marker.
+- Core remains Foundation-only. No new core saved properties, balance constants, grants or random draws. New EventKind requires the supplied latest consumer; old binary forward-reading of a newly written event is not promised.
+- Next: combine with the iOS notice commit and run Xcode/device checks. Review real road-disruption recovery and UI notice density.

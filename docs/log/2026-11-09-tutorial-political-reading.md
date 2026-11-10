@@ -1,0 +1,8 @@
+# 2026-11-09 09:59 EST — Ios Dev — ui/tutorial-and-political-reading
+
+- Wired the intro to an explicit optional tutorial choice. The last beat waits for the player; Skip/background/crisis/save/leave still release its clock token. Faster Continue taps cannot let a late timer choose Start.
+- Added a persistent per-seed on-map tutorial preference, field-guide lessons with first unmet step expanded, direct existing tool/overlay/site actions, skip/reopen and queued Govern navigation. Real standing capacity/hiring controls checks; no artificial completion/reward/save fields. Tool jumps clear old preview/road state first.
+- Added faction explanations, last-daily grievance advice, real demands/memory and exact decree context/projections. These read existing data, not new political rules.
+- Switched walkers to the tested clamped presentation clock. Replan at visual midnight, retain routes across economic ticks, suppress routes made unsafe by changed roads/footprints, freeze clock with Reduce Motion. No guaranteed traffic/production simulation is claimed.
+- Verified Swift 6.2 app syntax and actual extracted decree/tour/day-clock/world-lighting harnesses. Core dependency: 181 release tests pass in the prior role commit. No Apple SDK, Xcode build, IPA or physical phone test performed here.
+- Device review: fast intro tapping; Skip/manual start/guide replay; folded/unfolded and large text; VoiceOver; pause/pace restoration; site versus opening; tutorial Govern transition; new-island queue cleanup; frozen/background walker clock and route invalidation. Inspect a live demand and issue a festival, then compare intended versus drawn activity across a visual midnight.

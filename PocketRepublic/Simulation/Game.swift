@@ -2,124 +2,269 @@ import Combine
 import Foundation
 import PocketRepublicCore
 
-/// The app boundary: intents go into the core, then a new read-only state goes to UI.
+/// Intents remain on the main actor. Launch/recovery file work runs off actor;
+/// normal autosave retains the existing synchronous, ordered write boundary.
 @MainActor final class Game: ObservableObject {
     @Published private(set) var state: RepublicState
     @Published private(set) var saveIssue: String?
     @Published private(set) var feedback: String?
-
-    /// The old prototype's UserDefaults save is intentionally left untouched.
+    @Published private(set) var launchReady = false
+    @Published private(set) var loadingMessage = "Opening your republic…"
+    @Published private(set) var busy = false
+    @Published private(set) var lastSavedAt: Date?
+    @Published private(set) var backupPreview: CitySavePreview?
+    @Published private(set) var canRetrySave = false
+    @Published private(set) var citySession = UUID()
     let hasPrototypeSave: Bool
-    private let saveURL: URL?
+    private let repository: CitySaveRepository?
+    private var preparing = false
 
-    init() {
+    init(saveLocation: URL? = nil) {
         hasPrototypeSave = UserDefaults.standard.object(forKey: "pocket.republic.save.v1") != nil
-        let url = try? Self.makeSaveURL()
-        saveURL = url
-
-        if let url, FileManager.default.fileExists(atPath: url.path) {
-            do {
-                let data = try Data(contentsOf: url)
-                let file = try JSONDecoder().decode(SpatialSave.self, from: data)
-                let loaded = file.state
-                guard file.formatVersion == 1,
-                      file.checksum != 0,
-                      file.checksum == loaded.stateHash(),
-                      Self.isValid(loaded) else {
-                    throw SaveError.invalidState
-                }
-                state = loaded
-                saveIssue = nil
-            } catch {
-                state = Self.freshState()
-                saveIssue = "The city save could not be read. It is preserved; choose Start New City in Govern to replace it."
-            }
-        } else {
-            state = Self.freshState()
-            saveIssue = url == nil ? "City storage is unavailable on this device." : nil
-        }
-        if let url, !FileManager.default.fileExists(atPath: url.path) {
-            save()
-        }
+        repository = (saveLocation ?? (try? Self.makeSaveURL())).map(CitySaveRepository.init(primary:))
+        // Never shown or persisted. Heavy decoding/world generation happens only
+        // after the launch view has mounted, not inside StateObject creation.
+        state = RepublicState(worldSeed: 0, config: BalanceConfig(), map: WorldMap(width: 1, height: 1))
     }
 
     var snapshot: WorldSnapshot { state.snapshot() }
+    func clearFeedback() { feedback = nil }
 
-    /// True means the core accepted the intent. Save status remains separate.
-    @discardableResult
-    func send(_ intent: PlayerIntent) -> Bool {
-        guard saveIssue == nil else { return false }
+    func prepare() async {
+        guard !preparing, !launchReady else { return }
+        preparing = true; busy = true
+        defer { preparing = false; busy = false; launchReady = true }
+        guard let repository else { saveIssue = "City storage is unavailable on this device."; return }
+        loadingMessage = "Checking your saved island…"
+        let result = await Task.detached(priority: .userInitiated) { repository.load() }.value
+        backupPreview = result.backup
+        if let saved = result.state {
+            state = saved; lastSavedAt = result.savedAt; saveIssue = nil
+        } else if let issue = result.issue {
+            saveIssue = issue
+        } else {
+            loadingMessage = "Preparing a new island…"
+            let fresh = await Task.detached(priority: .userInitiated) { Self.freshState() }.value
+            do {
+                loadingMessage = "Saving your founding charter…"
+                let date = try await Task.detached(priority: .userInitiated) { try repository.write(fresh) }.value
+                state = fresh; lastSavedAt = date; saveIssue = nil
+            } catch { state = fresh; canRetrySave = true; saveIssue = "The new island could not be saved. Retry before playing." }
+        }
+    }
+
+    @discardableResult func send(_ intent: PlayerIntent) -> Bool {
+        guard launchReady, !busy, saveIssue == nil else { return false }
         var next = state
         switch SimulationEngine.apply(intent, to: &next) {
         case .accepted:
-            state = next
-            feedback = nil
-            save()
-            return true
+            state = next; feedback = nil; save(); return true
         case .rejected(let reason):
             if case .placeBuilding(let kind, _) = intent,
-               let locked = DevelopmentTree.lockReason(for: kind, in: state) {
-                feedback = locked
-            } else {
-                feedback = reason.playerFacingReason
-            }
+               let locked = DevelopmentTree.lockReason(for: kind, in: state) { feedback = locked }
+            else { feedback = reason.playerFacingReason }
             return false
         }
     }
 
     func advance() {
-        guard saveIssue == nil else { return }
-        guard !state.blocksAdvance else {
-            feedback = "Resolve the crisis before advancing."
-            return
-        }
+        guard launchReady, !busy, saveIssue == nil else { return }
+        guard !state.blocksAdvance else { feedback = "Resolve the crisis before advancing."; return }
         var next = state
         SimulationEngine.advance(&next)
-        state = next
+        state = next; feedback = nil; save()
+    }
+
+    @discardableResult func startNewCity(origin: RepublicOrigin? = nil) async -> Bool {
+        guard !busy else { return false }
+        guard let repository else { feedback = "City storage is unavailable. The selected city was not replaced."; return false }
+        busy = true; defer { busy = false }
+        let fresh = await Task.detached(priority: .userInitiated) { Self.freshState(origin: origin) }.value
+        do {
+            let date = try await Task.detached(priority: .userInitiated) { try repository.write(fresh) }.value
+            // Publish only after replacement succeeds. Never delete the old file
+            // first and never replace the live city with an unsaved draft.
+            state = fresh; citySession = UUID(); lastSavedAt = date; saveIssue = nil; canRetrySave = false; feedback = nil
+            refreshBackup(); return true
+        } catch {
+            feedback = "The new city was not created. The selected city is unchanged. Check available device storage and try again."
+            return false
+        }
+    }
+
+    func retrySave() {
+        guard canRetrySave, !busy else { return }
+        saveIssue = nil
+        save()
+    }
+
+    func saveNow() {
+        guard launchReady, !busy, saveIssue == nil else { return }
         feedback = nil
         save()
     }
 
-    func startNewCity(origin: RepublicOrigin? = nil) {
-        guard let saveURL else {
-            saveIssue = "City storage is unavailable on this device."
-            return
+    @discardableResult func retryLoad() async -> Bool {
+        guard !busy, !canRetrySave, let repository else { return false }
+        busy = true; defer { busy = false }
+        let result = await Task.detached(priority: .userInitiated) { repository.load() }.value
+        backupPreview = result.backup
+        guard let saved = result.state else {
+            saveIssue = result.issue ?? "No saved island was found. Choose New City deliberately to begin."
+            return false
         }
+        state = saved; citySession = UUID(); lastSavedAt = result.savedAt; saveIssue = nil; feedback = nil
+        return true
+    }
+
+    @discardableResult func restoreBackup() async -> Bool {
+        guard !busy, let repository else { return false }
+        busy = true; defer { busy = false }
         do {
-            if FileManager.default.fileExists(atPath: saveURL.path) {
-                try FileManager.default.removeItem(at: saveURL)
-            }
-            state = Self.freshState(origin: origin)
-            saveIssue = nil
-            feedback = nil
-            save()
-        } catch {
-            saveIssue = "Could not replace the city save: \(error.localizedDescription)"
-        }
+            let restored = try await Task.detached(priority: .userInitiated) { try repository.restore() }.value
+            state = restored.state; citySession = UUID(); lastSavedAt = restored.savedAt; saveIssue = nil; canRetrySave = false; feedback = nil
+            refreshBackup(); return true
+        } catch { feedback = "The backup was not restored. The selected city is unchanged. Check device storage or try loading again."; return false }
     }
 
     private func save() {
-        guard saveIssue == nil, let saveURL else { return }
-        var saved = state
-        saved.trimEvents(keepingLast: 500)
+        guard saveIssue == nil, let repository else { return }
+        var saved = state; saved.trimEvents(keepingLast: 500)
         do {
-            let data = try JSONEncoder().encode(SpatialSave(
-                formatVersion: 1,
-                checksum: saved.stateHash(),
-                state: saved
-            ))
-            try data.write(to: saveURL, options: .atomic)
-            state = saved
+            lastSavedAt = try repository.write(saved)
+            state = saved; canRetrySave = false
         } catch {
-            saveIssue = "City changes could not be saved: \(error.localizedDescription)"
+            canRetrySave = true
+            saveIssue = "City changes could not be saved. Play is paused; Retry Save keeps your current changes."
         }
     }
 
-    private static func freshState(origin: RepublicOrigin? = nil) -> RepublicState {
+    func refreshBackup() { backupPreview = repository?.backupSummary() }
+
+    nonisolated private static func freshState(origin: RepublicOrigin? = nil) -> RepublicState {
         WorldGenerator.generate(seed: UInt64.random(in: UInt64.min...UInt64.max), origin: origin)
     }
 
-    private static func isValid(_ saved: RepublicState) -> Bool {
+    private static func makeSaveURL() throws -> URL {
+        let base = try FileManager.default.url(
+            for: .applicationSupportDirectory,
+            in: .userDomainMask,
+            appropriateFor: nil,
+            create: true
+        )
+        let folder = base.appendingPathComponent("PocketRepublic", isDirectory: true)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        return folder.appendingPathComponent("spatial-v1.json")
+    }
+
+}
+
+// MARK: - Foundation save boundary
+struct CitySavePreview: Sendable {
+    let day: Int32
+    let residents: Int
+    let savedAt: Date?
+    init(state: RepublicState, savedAt: Date?) {
+        day = state.day; residents = state.citizens.filter(\.alive).count; self.savedAt = savedAt
+    }
+}
+
+struct CitySaveLoad: Sendable {
+    let state: RepublicState?
+    let savedAt: Date?
+    let backup: CitySavePreview?
+    let issue: String?
+}
+
+struct CitySaveRepository: Sendable {
+    let primary: URL
+    var backup: URL { primary.deletingLastPathComponent().appendingPathComponent("spatial-backup.json") }
+    var preserved: URL { primary.deletingLastPathComponent().appendingPathComponent("spatial-preserved.json") }
+    var preservedBackup: URL { primary.deletingLastPathComponent().appendingPathComponent("spatial-preserved-backup.json") }
+
+    func load() -> CitySaveLoad {
+        let preview = backupSummary()
+        guard FileManager.default.fileExists(atPath: primary.path) else {
+            // Do not silently create a fresh city over a missing primary when a
+            // backup exists; make recovery an explicit player choice.
+            return CitySaveLoad(state: nil, savedAt: nil, backup: preview,
+                issue: FileManager.default.fileExists(atPath: backup.path)
+                    ? (preview == nil ? "The main city file is missing and the backup could not be verified. Files are preserved; retry loading or deliberately choose New City."
+                       : "The main city file is missing. Restore the verified backup or choose New City.") : nil)
+        }
+        do {
+            let state = try CitySaveCodec.decode(Data(contentsOf: primary))
+            return CitySaveLoad(state: state, savedAt: modificationDate(primary), backup: preview, issue: nil)
+        } catch {
+            return CitySaveLoad(state: nil, savedAt: nil, backup: preview,
+                issue: "The saved city could not be verified. Its file is preserved. Retry Load or choose from the available recovery options below.")
+        }
+    }
+
+    @discardableResult func write(_ state: RepublicState) throws -> Date {
+        let data = try CitySaveCodec.encode(state)
+        if FileManager.default.fileExists(atPath: primary.path) {
+            let old = try Data(contentsOf: primary)
+            if let previous = try? CitySaveCodec.decode(old) {
+                if previous.stateHash() == state.stateHash() { return modificationDate(primary) ?? Date() }
+                if FileManager.default.fileExists(atPath: backup.path) {
+                    let previousBackup = try Data(contentsOf: backup)
+                    if (try? CitySaveCodec.decode(previousBackup)) == nil {
+                        try previousBackup.write(to: preservedBackup, options: .atomic)
+                    }
+                }
+                try old.write(to: backup, options: .atomic)
+            } else {
+                try old.write(to: preserved, options: .atomic)
+            }
+        }
+        try data.write(to: primary, options: .atomic)
+        return modificationDate(primary) ?? Date()
+    }
+
+    func restore() throws -> (state: RepublicState, savedAt: Date) {
+        let data = try Data(contentsOf: backup)
+        let saved = try CitySaveCodec.decode(data)
+        // Preserve the current primary separately; never rotate it over the
+        // chosen recovery point, and never touch backup on failed restoration.
+        if FileManager.default.fileExists(atPath: primary.path) {
+            try Data(contentsOf: primary).write(to: preserved, options: .atomic)
+        }
+        try data.write(to: primary, options: .atomic)
+        return (saved, modificationDate(primary) ?? Date())
+    }
+
+    func backupSummary() -> CitySavePreview? {
+        guard let data = try? Data(contentsOf: backup), let state = try? CitySaveCodec.decode(data) else { return nil }
+        return CitySavePreview(state: state, savedAt: modificationDate(backup))
+    }
+
+    private func modificationDate(_ url: URL) -> Date? {
+        (try? FileManager.default.attributesOfItem(atPath: url.path)[.modificationDate]) as? Date
+    }
+}
+
+struct SpatialSave: Codable {
+    let formatVersion: Int
+    let checksum: UInt64
+    let state: RepublicState
+}
+
+enum CitySaveCodec {
+    enum Failure: Error { case invalidState }
+    static func decode(_ data: Data) throws -> RepublicState {
+        let file = try JSONDecoder().decode(SpatialSave.self, from: data)
+        guard file.formatVersion == 1, isValid(file.state), file.checksum != 0,
+              file.checksum == file.state.stateHash() else { throw Failure.invalidState }
+        try file.state.checkConservation()
+        return file.state
+    }
+    static func encode(_ state: RepublicState) throws -> Data {
+        guard isValid(state) else { throw Failure.invalidState }
+        try state.checkConservation()
+        return try JSONEncoder().encode(SpatialSave(formatVersion: 1, checksum: state.stateHash(), state: state))
+    }
+    static func isValid(_ saved: RepublicState) -> Bool {
         let map = saved.map
         guard saved.schemaVersion == RepublicState.currentSchemaVersion,
               map.width > 0, map.height > 0, map.width <= 256, map.height <= 256,
@@ -210,23 +355,4 @@ import PocketRepublicCore
         return true
     }
 
-    private static func makeSaveURL() throws -> URL {
-        let base = try FileManager.default.url(
-            for: .applicationSupportDirectory,
-            in: .userDomainMask,
-            appropriateFor: nil,
-            create: true
-        )
-        let folder = base.appendingPathComponent("PocketRepublic", isDirectory: true)
-        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        return folder.appendingPathComponent("spatial-v1.json")
-    }
-
-    private enum SaveError: Error { case invalidState }
-}
-
-private struct SpatialSave: Codable {
-    let formatVersion: Int
-    let checksum: UInt64
-    let state: RepublicState
 }

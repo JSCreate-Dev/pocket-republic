@@ -35,6 +35,11 @@ let wageCard = DecreeCardReading.make(spec: wage, state: state)
 precondition(wageCard.costLabel == "Free")
 precondition(wageCard.duration.contains("per civic worker/day"))
 precondition(wageCard.caution.contains("future civic payroll"))
+precondition(!wageCard.context.isEmpty)
+var capped = state
+capped.factions[Int(FactionKind.officials.rawValue)].favor = 100
+let cappedCard = DecreeCardReading.make(spec: wage, state: capped)
+precondition(cappedCard.chips.first { $0.name == "Officials" }!.projection == "Approval 100 → 100")
 let tax = DecreeCatalogue.all.first { $0.effect.incomeTaxDelta > 0 }!
 state.policy.incomeTaxPercent = 80
 precondition(DecreeCardReading.make(spec: tax, state: state).duration.contains("80% → 80%"))

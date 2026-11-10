@@ -41,7 +41,7 @@ elections block; the standing agenda never stalls the clock.
 `advance()` runs these in order, and the order is load-bearing:
 
 1. `advanceConstruction`, then `rebuildSpatialCaches` — only when `fields.dirty` (a build/demolish happened)
-2. `assignWork` → settlement arrivals (when enabled) → hire newcomers → `produce` → `distributeFood` → `payWages`
+2. `assignHomes` (completed spare homes go to existing residents first) → `assignWork` → settlement arrivals (when enabled) → hire newcomers → `produce` → `distributeFood` → `payWages`
 3. `feedCitizens` → `collectTaxes` → `payUpkeep` → `spoil`
 4. `updateWellbeing` — strictly two-phase: read an immutable snapshot, collect
    `CitizenDelta`s, then apply in ID order. No citizen sees another's same-day

@@ -70,3 +70,31 @@ public struct Faction: Codable, Sendable, Equatable {
         if memory.count > 24 { memory.removeFirst(memory.count - 24) }
     }
 }
+
+/// Live membership and mood, alongside the last daily grievance and remembered
+/// government acts. Reading this report never updates or rewrites faction state.
+public struct FactionReport: Sendable {
+    public let kind: FactionKind
+    public let members: Int
+    public let happiness: Int
+    public let loyalty: Int
+    public let favor: Int32
+    public let concern: CauseKind?
+    public let concernPercent: Int32
+    public let demands: [AgendaItem]
+    public let memory: [FavorRecord]
+
+    public init(kind: FactionKind, state: RepublicState) {
+        self.kind = kind
+        let people = state.citizens.filter { $0.alive && FactionKind.of($0.occupation) == kind }
+        members = people.count
+        happiness = people.isEmpty ? 0 : Int(people.reduce(Int64(0)) { $0 + Int64($1.happiness) } / Int64(people.count))
+        loyalty = people.isEmpty ? 0 : Int(people.reduce(Int64(0)) { $0 + Int64($1.loyalty) } / Int64(people.count))
+        let stored = state.factions.first { $0.kind == kind }
+        favor = stored?.favor ?? 0
+        concern = people.isEmpty ? nil : stored?.dominantConcern
+        concernPercent = people.isEmpty ? 0 : stored?.concernWeight ?? 0
+        demands = state.agenda.filter { $0.kind == .factionDemand && $0.faction == kind && $0.isLive(on: state.day) }
+        memory = Array((stored?.memory ?? []).suffix(3).reversed())
+    }
+}

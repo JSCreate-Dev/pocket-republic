@@ -7,6 +7,8 @@ import PocketRepublicCore
 /// The SpriteKit world stays behind them and is never part of the saved simulation.
 struct IslandView: View {
     var islandVisible: Bool
+    var onGovern: () -> Void = {}
+    var onReady: () -> Void = {}
     @EnvironmentObject private var game: Game
     @EnvironmentObject private var clock: DayClock
     @Environment(\.verticalSizeClass) private var verticalSizeClass
@@ -15,6 +17,9 @@ struct IslandView: View {
     @Environment(\.scenePhase) private var appPhase
     @AppStorage("pocket.republic.intro.seed.v1") private var touredSeed = ""
     @AppStorage("pocket.republic.intro.enabled.v1") private var automaticTours = true
+    @AppStorage("pocket.republic.tutorial.active-seed.v1") private var guidedSeed = ""
+    @AppStorage("pocket.republic.field-guide.visible.v1") private var showFieldGuide = true
+    @State private var sceneReady = false
     @State private var scene = IslandScene(size: CGSize(width: 400, height: 470))
     @State private var tool: CityTool = .inspect
     @State private var selectedTile: TileIndex?
@@ -40,13 +45,17 @@ struct IslandView: View {
     @State private var roadReceipt: RoadReceipt?
     @State private var mapOverlay: MapOverlayMode = .standard
     @State private var showLayerHelp = false
+    @State private var showNoticesHelp = false
+    @AppStorage("pocket.republic.map-notices.v1") private var mapNotices = true
     @State private var showGrowth = false
     @State private var showJournal = false
     @State private var focusGoals: [CityFocus] = []
+    @State private var guideLessons: [SettlementLesson] = []
     @State private var dayBaseline: CityDaySnapshot?
     @State private var dayResults: [CityDayResult] = []
     @State private var queuedFocus: CityFocusAction?
     @State private var queuedTour = false
+    @State private var queuedGovernment = false
     @State private var tour = FoundingTourPolicy()
     @State private var tourRun = UUID()
 
@@ -137,10 +146,18 @@ struct IslandView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .clipShape(Rectangle())
             .onAppear {
+                let session = game.citySession
+                scene.onFirstFrame = {
+                    guard game.citySession == session else { return }
+                    sceneReady = true
+                    onReady()
+                    considerOpeningTour()
+                }
                 scene.scaleMode = .resizeFill
                 scene.setFraming(layout.framing)
                 scene.render(game.state)
                 scene.setOverlay(mapOverlay)
+                scene.setNoticesVisible(mapNotices)
                 scene.setSelection(selectedBuildingID)
                 scene.setCitizenSelection(selectedCitizenID)
                 configureTapHandler()
@@ -157,11 +174,13 @@ struct IslandView: View {
         }
         .sheet(isPresented: $showJournal, onDismiss: finishJournal) {
             CityReadingSheet("Island Journal") {
-                IslandJournalPanel(goals: focusGoals, results: dayResults,
+                IslandJournalPanel(goals: focusGoals, lessons: guideLessons, results: dayResults,
                     automaticTours: $automaticTours,
                     canTour: !game.state.blocksAdvance && game.saveIssue == nil && tool == .inspect,
                     onGoal: { action in queuedFocus = action; showJournal = false },
-                    onTour: { queuedTour = true; showJournal = false })
+                    onTour: { queuedTour = true; showJournal = false },
+                    onGuide: startTutorial,
+                    onGovernment: { queuedGovernment = true; showJournal = false })
             }
         }
         .task(id: tourRun) {
@@ -170,13 +189,15 @@ struct IslandView: View {
             guard !Task.isCancelled, tour.active else { return }
             scene.presentTourBeat(tour.beat, reduceMotion: reduceMotion || UIAccessibility.isVoiceOverRunning)
             guard !UIAccessibility.isVoiceOverRunning else { return }
-            for _ in 0..<FoundingTourPolicy.beatCount {
+            for _ in 0..<(FoundingTourPolicy.beatCount - 1) {
                 do { try await Task.sleep(for: .seconds(2.5)) } catch { return }
                 guard !Task.isCancelled, tour.active else { return }
                 guard !UIAccessibility.isVoiceOverRunning else { return }
-                advanceTour()
+                guard tour.advanceAutomatically() else { return }
+                scene.presentTourBeat(tour.beat, reduceMotion: reduceMotion)
             }
         }
+        .onChange(of: mapNotices) { _, shown in scene.setNoticesVisible(shown) }
         .onChange(of: reduceMotion) { _, reduced in if reduced { scene.stopTourMotion() } }
         .onChange(of: appPhase) { _, phase in
             if phase != .active { finishTour() } else { considerOpeningTour() }
@@ -193,6 +214,21 @@ struct IslandView: View {
         }
         .sheet(isPresented: $showCharter) {
             CityReadingSheet("Founding charter") { SeasonCard() }
+        }
+        .sheet(isPresented: $showNoticesHelp) {
+            CityReadingSheet("Map notices") {
+                VStack(alignment: .leading, spacing: 14) {
+                    Label("Broken link: a building needs road access", systemImage: "link")
+                    Label("Question mark: a building needs workers", systemImage: "person.fill.questionmark")
+                    Label("Fork and knife: a market or resident needs food", systemImage: "fork.knife")
+                    Label("Blue hammer: construction is still in progress", systemImage: "hammer.fill")
+                    Label("Green seal: a building opened today", systemImage: "checkmark.seal.fill")
+                    Label("House: a resident needs housing", systemImage: "house.fill")
+                    Label("Briefcase: a resident is looking for work", systemImage: "briefcase.fill")
+                    Text("Tap a notice to inspect its building or resident and read the next step. Problems take priority over opening notices. Up to 12 building and 6 resident notices appear nearby; resident notices follow visible walkers and hide indoors. The People tab covers everyone, including residents without a map position.")
+                    Text("Notices clear as the underlying problem clears. They hide while building, drawing roads or using data overlays. Turn them off from the map menu any time.")
+                }.font(.subheadline).foregroundStyle(RepublicTheme.ink)
+            }
         }
         .sheet(isPresented: $showLayerHelp) {
             CityReadingSheet(mapOverlay.title) {
@@ -232,6 +268,7 @@ struct IslandView: View {
             finishTour()
             queuedFocus = nil
             queuedTour = false
+            queuedGovernment = false
             showJournal = false
             leaveBuildSession()
             selectedAgendaID = nil
@@ -489,6 +526,7 @@ struct IslandView: View {
 
     private func dockTool(_ option: CityTool) -> some View {
         Button {
+            leaveBuildSession()
             tool = option
             showCatalog = false
             configureTapHandler()
@@ -561,7 +599,11 @@ struct IslandView: View {
                 }
                 Spacer(minLength: 0)
                 Menu {
-                    Button("Island Journal", systemImage: "book.closed") { showJournal = true }
+                    Button("Field Guide & Journal", systemImage: "book.closed") { showJournal = true }
+                    Button("Start settlement tutorial", systemImage: "graduationcap") { startTutorial() }
+                        .disabled(game.state.blocksAdvance || game.saveIssue != nil)
+                    Toggle("Building & resident notices", isOn: $mapNotices)
+                    Button("Explain map icons", systemImage: "info.circle") { showNoticesHelp = true }
                     Divider()
                     Picker("Map layer", selection: $mapOverlay) {
                         ForEach(MapOverlayMode.allCases) { mode in
@@ -587,6 +629,9 @@ struct IslandView: View {
                     }.buttonStyle(.plain).accessibilityLabel("Explain \(mapOverlay.title) colors")
                 }
             }
+            if guidedSeed == String(game.state.worldSeed) {
+                tutorialCoach
+            } else {
             Button {
                 if DevelopmentTree.isEnabled(in: game.state) { showRoadmap.toggle() }
                 else { showCharter.toggle() }
@@ -631,6 +676,7 @@ struct IslandView: View {
                 }
                 .buttonStyle(.plain)
                 .accessibilityHint("Opens current goals and recent day results")
+            }
             }
             if let seasonBanner {
                 Text(seasonBanner).font(.caption.weight(.bold)).foregroundStyle(RepublicTheme.brass)
@@ -749,12 +795,44 @@ struct IslandView: View {
             onSkip: finishTour, onContinue: advanceTour)
     }
 
+    private func startTutorial() {
+        guard islandVisible, !tour.active, !game.state.blocksAdvance, game.saveIssue == nil else { return }
+        guidedSeed = String(game.state.worldSeed)
+        showFieldGuide = true
+        showJournal = true
+    }
+
+    private var tutorialReadyForPolitics: Bool {
+        guideLessons.first(where: { $0.id == "arrivals" })?.complete == true
+    }
+
+    private var tutorialCoach: some View {
+        HStack(alignment: .top, spacing: 8) {
+            Button { showJournal = true } label: {
+                VStack(alignment: .leading, spacing: 4) {
+                    Label(tutorialReadyForPolitics ? "5. Meet your factions in Govern" : guideLessons.first(where: { !$0.complete })?.title ?? "5. Meet your factions in Govern",
+                          systemImage: "graduationcap.fill")
+                        .font(.caption.weight(.semibold)).foregroundStyle(RepublicTheme.brass)
+                    Text(tool.isBuilding ? "Move the preview beside a road. Green footprint → Place. Cancel exits without ordering."
+                         : placementReceipt != nil ? "Order received. Inspect the construction site; a foundation is not open yet."
+                         : "Tap for the next instruction and a direct tool. Pause the dock clock whenever you want time to read.")
+                        .font(.caption2).foregroundStyle(RepublicTheme.paper).multilineTextAlignment(.leading)
+                }.frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+            }.buttonStyle(.plain)
+                .accessibilityLabel("Tutorial: \(guideLessons.first(where: { !$0.complete })?.title ?? "Meet your factions in Govern"). Open instructions.")
+            Button(tutorialReadyForPolitics ? "Finish" : "Skip") { guidedSeed = "" }
+                .font(.caption).frame(minWidth: 44, minHeight: 44).buttonStyle(.plain)
+                .accessibilityLabel("Skip settlement tutorial; reopen it from Field Guide and Journal")
+        }
+    }
+
     private var developmentHint: String {
         focusGoals.first?.title ?? "Review your island's next move"
     }
 
     private func observeIsland(_ state: RepublicState) {
         focusGoals = CityFocusReader.goals(in: state)
+        guideLessons = SettlementGuide.lessons(in: state)
         let snapshot = CityDaySnapshot(state: state)
         guard let previous = dayBaseline, previous.seed == snapshot.seed else {
             dayBaseline = snapshot
@@ -771,16 +849,24 @@ struct IslandView: View {
     private func finishJournal() {
         let action = queuedFocus
         let replay = queuedTour
+        let government = queuedGovernment
         queuedFocus = nil
         queuedTour = false
+        queuedGovernment = false
         guard islandVisible else { return }
         if replay { startTour(); return }
+        if government {
+            if tutorialReadyForPolitics { guidedSeed = "" }
+            onGovern()
+            return
+        }
         guard let action else { return }
         if game.state.blocksAdvance { presentAttention(); return }
         switch action {
         case .build(let kind):
             guard game.saveIssue == nil, DevelopmentTree.canBuild(kind, in: game.state),
                   let option = CityTool.allCases.first(where: { $0.buildingKind == kind }) else { return }
+            leaveBuildSession()
             tool = option
             showCatalog = false
             configureTapHandler()
@@ -794,13 +880,13 @@ struct IslandView: View {
     private func considerOpeningTour() {
         guard FoundingTourPolicy.shouldAutostart(day: game.state.day, seed: game.state.worldSeed,
             seenSeed: touredSeed, enabled: automaticTours && game.state.development != nil,
-            blocked: game.state.blocksAdvance || game.saveIssue != nil || !islandVisible || appPhase != .active || UIApplication.shared.applicationState != .active || UIAccessibility.isVoiceOverRunning)
+            blocked: !sceneReady || game.state.blocksAdvance || game.saveIssue != nil || !islandVisible || appPhase != .active || UIApplication.shared.applicationState != .active || UIAccessibility.isVoiceOverRunning)
         else { return }
         startTour()
     }
 
     private func startTour() {
-        guard islandVisible, appPhase == .active, UIApplication.shared.applicationState == .active, tool == .inspect, !game.state.blocksAdvance, game.saveIssue == nil else { return }
+        guard sceneReady, islandVisible, appPhase == .active, UIApplication.shared.applicationState == .active, tool == .inspect, !game.state.blocksAdvance, game.saveIssue == nil else { return }
         guard withAnimation((reduceMotion || UIAccessibility.isReduceMotionEnabled) ? nil : .easeInOut(duration: 0.2), { tour.begin() }) else { return }
         touredSeed = String(game.state.worldSeed)
         selectedCitizenID = nil
@@ -813,6 +899,11 @@ struct IslandView: View {
 
     private func advanceTour() {
         guard tour.active else { return }
+        if tour.beat == FoundingTourPolicy.beatCount - 1 {
+            finishTour()
+            startTutorial()
+            return
+        }
         if tour.advance() { scene.presentTourBeat(tour.beat, reduceMotion: reduceMotion || UIAccessibility.isVoiceOverRunning) }
         else { finishTour() }
     }
@@ -831,6 +922,8 @@ struct IslandView: View {
             Text("\(outlook.freeBeds) spare beds · \(outlook.openJobs) open jobs")
             Text("Happiness \(outlook.happiness)% · \(outlook.hungryResidents) hungry residents")
             if outlook.enabled {
+                Text("Current capacity supports \(outlook.expectedArrivals) of \(game.state.config.settlementGrowth?.arrivalsPerWave ?? 0) newcomers after existing residents take available homes and jobs. This uses today's completed buildings and stock; conditions can change before the check.")
+                    .font(.subheadline).fixedSize(horizontal: false, vertical: true)
                 if outlook.ready {
                     Label("Ready for the next arrival check", systemImage: "checkmark.circle.fill")
                         .foregroundStyle(RepublicTheme.fertile)
@@ -1169,6 +1262,11 @@ struct IslandView: View {
                 Button { selectedCitizenID = nil } label: {
                     Image(systemName: "xmark").frame(width: 44, height: 44)
                 }.accessibilityLabel("Close resident inspection")
+            }
+            if let notice = CitizenNeeds.attention(for: citizen.id, in: game.state) {
+                Label(notice.title, systemImage: "exclamationmark.circle.fill")
+                    .font(.subheadline.weight(.semibold)).foregroundStyle(RepublicTheme.brass)
+                Text(notice.help).font(.subheadline).fixedSize(horizontal: false, vertical: true)
             }
             Text(citizenActivity.isEmpty ? "Daily routine" : citizenActivity)
                 .font(.subheadline.weight(.semibold)).foregroundStyle(RepublicTheme.brass)
@@ -1839,15 +1937,21 @@ private struct CityReadingSheet<Content: View>: View {
 }
 
 private struct IslandJournalPanel: View {
+    @AppStorage("pocket.republic.field-guide.visible.v1") private var showGuide = true
     let goals: [CityFocus]
+    let lessons: [SettlementLesson]
     let results: [CityDayResult]
     @Binding var automaticTours: Bool
     let canTour: Bool
     let onGoal: (CityFocusAction) -> Void
     let onTour: () -> Void
+    let onGuide: () -> Void
+    let onGovernment: () -> Void
+    @State private var expandedLesson: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
+            fieldGuide
             Text("Your next move").font(RepublicTheme.heading(.title2))
             Text("These are suggestions from the town's current needs. Build in your own order; residents handle their own jobs.")
                 .font(.subheadline).foregroundStyle(RepublicTheme.inkSoft)
@@ -1880,6 +1984,7 @@ private struct IslandJournalPanel: View {
                         stat("Net treasury", money(result.treasuryDelta), positive: result.treasuryDelta >= 0)
                         stat("Food stock", signed(result.foodDelta), positive: result.foodDelta >= 0)
                         stat("Happiness", "\(signed(Int64(result.happinessDelta))) pts", positive: result.happinessDelta >= 0)
+                        stat("Working residents", signed(Int64(result.employmentDelta)), positive: result.employmentDelta >= 0)
                     }
                     if result.newlyOpened > 0 {
                         Label("\(result.newlyOpened) buildings opened", systemImage: "building.2.fill").font(.caption)
@@ -1898,6 +2003,50 @@ private struct IslandJournalPanel: View {
             Text("Tours pause the clock and can be skipped. Finish any active building or road session before replaying.")
                 .font(.caption).foregroundStyle(RepublicTheme.inkSoft)
         }.foregroundStyle(RepublicTheme.ink)
+    }
+
+    private var fieldGuide: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Toggle("Founder's field guide", isOn: $showGuide)
+                .font(RepublicTheme.heading(.title3))
+            if showGuide {
+                Text("Learn by building. These checks describe the town right now, so they can change as residents arrive. No timers, extra fees or tutorial rewards.")
+                    .font(.subheadline).foregroundStyle(RepublicTheme.inkSoft)
+                Text("\(lessons.filter(\.complete).count) of \(lessons.count) conditions ready")
+                    .font(.caption.weight(.semibold))
+                Button("Start / resume the on-map tutorial", action: onGuide)
+                    .frame(minHeight: 44).buttonStyle(.bordered)
+                ForEach(lessons) { lesson in lessonCard(lesson) }
+                Text("5. Govern with consequences")
+                    .font(RepublicTheme.heading(.headline))
+                Text("Open Govern to meet the factions and compare decrees. Read the upfront cost, lasting policy, and approval changes before confirming. Favour is remembered political support; happiness and loyalty describe residents. Optional reading keeps time running—pause from the island dock if you want time to think.")
+                    .font(.subheadline)
+                Button("Meet the factions in Govern", action: onGovernment)
+                    .frame(minHeight: 44).buttonStyle(.bordered)
+                Text("You can hide this guide and reopen it here any time. Residents choose jobs automatically; their map walks illustrate planned daily life, while money, food and arrivals settle on daily updates.")
+                    .font(.caption).foregroundStyle(RepublicTheme.inkSoft)
+            }
+        }.dioramaCard(fill: RepublicTheme.sand.opacity(0.35))
+        .onAppear { expandedLesson = lessons.first(where: { !$0.complete })?.id }
+    }
+
+    private func lessonCard(_ lesson: SettlementLesson) -> some View {
+        DisclosureGroup(isExpanded: Binding(
+            get: { expandedLesson == lesson.id },
+            set: { expandedLesson = $0 ? lesson.id : nil }
+        )) {
+            VStack(alignment: .leading, spacing: 10) {
+                Text(lesson.instruction).fixedSize(horizontal: false, vertical: true)
+                Text(lesson.evidence).font(.caption.weight(.semibold))
+                if !lesson.complete {
+                    Button(lesson.actionLabel) { onGoal(lesson.action) }
+                        .frame(minHeight: 44).buttonStyle(.bordered)
+                }
+            }.font(.subheadline).padding(.top, 8)
+        } label: {
+            Label(lesson.title, systemImage: lesson.complete ? "checkmark.circle.fill" : "circle")
+                .foregroundStyle(lesson.complete ? RepublicTheme.fertile : RepublicTheme.ink)
+        }.dioramaCard()
     }
 
     private func stat(_ label: String, _ value: String, positive: Bool) -> some View {
@@ -1923,18 +2072,18 @@ private struct FoundingTourOverlay: View {
         switch beat {
         case 0: return "A new republic"
         case 1: return "People make a town"
-        default: return "Give them a future"
+        default: return "Learn to lead"
         }
     }
     private var caption: String {
         switch beat {
         case 0: return "\(population) residents call this island home. The next neighbourhood is yours to shape."
         case 1: return "Food, work and a place to live keep the island moving. Residents find their own jobs."
-        default: return "Your next move: \(nextGoal). Start small and watch the town become yours."
+        default: return "Start the hands-on tutorial: place a workshop, watch hiring, add homes, follow food and meet your factions. You can skip or reopen it from the field guide."
         }
     }
     private var continueButton: some View {
-        Button(beat == 2 ? "Enter your republic" : "Continue", action: onContinue)
+        Button(beat == 2 ? "Start settlement tutorial" : "Continue", action: onContinue)
             .frame(minWidth: 120, maxWidth: .infinity, minHeight: 44).buttonStyle(.borderedProminent).tint(RepublicTheme.terracotta)
     }
     var body: some View {
@@ -2000,6 +2149,13 @@ struct FoundingTourPolicy: Equatable {
         if beat + 1 < Self.beatCount { beat += 1; return true }
         active = false
         return false
+    }
+    /// The final beat waits for an explicit tutorial choice, even when a player
+    /// taps Continue faster than the timer. A timer must never choose for them.
+    mutating func advanceAutomatically() -> Bool {
+        guard active, beat < Self.beatCount - 1 else { return false }
+        beat += 1
+        return true
     }
     mutating func finish() { active = false }
 }

@@ -59,6 +59,14 @@ private struct CitizenCard: View {
                 Text("Work: \(buildingName(citizen.work))")
                     .font(RepublicTheme.body(.caption))
                     .foregroundStyle(RepublicTheme.inkSoft)
+                if let notice = CitizenNeeds.attention(for: citizen.id, in: game.state) {
+                    DisclosureGroup {
+                        Text(notice.help).font(.caption).fixedSize(horizontal: false, vertical: true)
+                    } label: {
+                        Label(notice.title, systemImage: "exclamationmark.circle.fill")
+                            .font(.caption.weight(.semibold)).foregroundStyle(RepublicTheme.alert)
+                    }
+                }
                 DisclosureGroup("Today's routine", isExpanded: $showDay) {
                     if showDay { dayDetails }
                 }

@@ -78,7 +78,7 @@ public struct BuildingInspection: Equatable, Sendable {
 }
 
 public struct BuildingAttention: Equatable, Sendable {
-    public enum Kind: String, Sendable { case road, staff, food }
+    public enum Kind: String, Sendable { case road, staff, food, construction, opened }
     public let kind: Kind
     public let title: String
     public let help: String
@@ -89,7 +89,11 @@ public enum BuildingInspector {
     public static func attention(id: BuildingID, in state: RepublicState) -> BuildingAttention? {
         guard id.raw >= 0, Int(id.raw) < state.buildings.count else { return nil }
         let building = state.buildings[Int(id.raw)]
-        guard building.id == id, building.isStanding(on: state.map) else { return nil }
+        guard building.id == id, building.occupiesGround(on: state.map) else { return nil }
+        if building.isUnderConstruction {
+            return BuildingAttention(kind: .construction, title: "Under construction",
+                help: "\(building.daysConstructed) of \(building.daysRequired) work days complete. It cannot house residents, hire or supply services until it opens.")
+        }
         for problem in BuildingInspectCatalog.problemPriority
         where BuildingInspectCatalog.matches(problem, building: building, state: state) {
             switch problem {
@@ -102,6 +106,9 @@ public enum BuildingInspector {
                     ? "Residents here are hungry. Check market access, food stock and their money."
                     : "This market is empty. Check farm staffing and food supply, or import food.")
             }
+        }
+        if building.daysRequired > 0 && building.daysConstructed == building.daysRequired && state.day == building.opensOnDay {
+            return BuildingAttention(kind: .opened, title: "Newly opened", help: "Construction is finished. Residents can now use this building; reachable vacancies fill automatically.")
         }
         return nil
     }
