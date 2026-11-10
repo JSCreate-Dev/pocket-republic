@@ -36,6 +36,11 @@ struct IslandView: View {
     @State private var seenSeason: String?
     @State private var seasonBanner: String?
     @State private var showCatalog = false
+    @State private var queuedBuilding: BuildingKind?
+    @State private var queuedBuildingSeed: UInt64?
+    @State private var islandMoment: String?
+    @State private var momentUntilDay: Int32 = -1
+    @State private var showBuildHelp = false
     @State private var showCharter = false
     @State private var showRoadmap = false
     @State private var unlockedBanner: DevelopmentUnlock?
@@ -70,7 +75,7 @@ struct IslandView: View {
                                            detailOpen: detailOpen,
                                            cardOpen: cardOpen)
             ZStack(alignment: .topLeading) {
-                SpriteView(scene: scene)
+                SpriteView(scene: scene, isPaused: !islandVisible || appPhase != .active)
                     .allowsHitTesting(!tour.active).accessibilityHidden(tour.active)
                     .background(Color(red: 0.05, green: 0.22, blue: 0.37))
 
@@ -172,6 +177,9 @@ struct IslandView: View {
                 scene.setFraming(framing)
             }
         }
+        .sheet(isPresented: $showCatalog, onDismiss: finishCatalog) {
+            CityReadingSheet("Build something") { catalog }
+        }
         .sheet(isPresented: $showJournal, onDismiss: finishJournal) {
             CityReadingSheet("Island Journal") {
                 IslandJournalPanel(goals: focusGoals, lessons: guideLessons, results: dayResults,
@@ -210,10 +218,10 @@ struct IslandView: View {
             }
         }
         .sheet(isPresented: $showGrowth) {
-            CityReadingSheet("Settlement growth") { growthDetails }
+            CityReadingSheet("New neighbours") { growthDetails }
         }
         .sheet(isPresented: $showCharter) {
-            CityReadingSheet("Founding charter") { SeasonCard() }
+            CityReadingSheet("Your island’s story") { SeasonCard() }
         }
         .sheet(isPresented: $showNoticesHelp) {
             CityReadingSheet("Map notices") {
@@ -321,7 +329,7 @@ struct IslandView: View {
         }
         .onChange(of: showCatalog) { _, shown in
             if shown { selectedCitizenID = nil }
-            clock.setModal(IslandSessionHold.catalogToken, presented: false)
+            clock.setModal(IslandSessionHold.catalogToken, presented: shown)
         }
         .onChange(of: islandVisible) { _, visible in
             if !visible { finishTour(); leaveBuildSession() } else { considerOpeningTour() }
@@ -376,8 +384,6 @@ struct IslandView: View {
                 placeBar
             } else if tool == .road {
                 roadBar
-            } else if showCatalog {
-                catalog
             } else {
                 if let citizen = selectedCitizen {
                     citizenCard(citizen)
@@ -486,8 +492,9 @@ struct IslandView: View {
         } else {
         dockTool(.inspect)
         Button {
-            showCatalog.toggle()
-            if showCatalog { tool = .inspect }
+            leaveBuildSession()
+            queuedBuilding = nil
+            showCatalog = true
         } label: {
             Label("Build", systemImage: "hammer.fill")
                 .frame(maxWidth: .infinity, minHeight: 44)
@@ -498,19 +505,24 @@ struct IslandView: View {
         }
     }
 
+    private var clockButtonTitle: String {
+        if case .paused = clock.policy.pace { return "Play" }
+        return clock.policy.tickInterval == nil ? "Waiting" : "Pause"
+    }
+
     @ViewBuilder private var clockTools: some View {
         Button {
             clock.togglePause()
         } label: {
-            Label(clock.policy.controlLabel, systemImage: clock.policy.pace == .paused ? "play.fill" : "pause.fill")
+            Label(clockButtonTitle, systemImage: clock.policy.pace == .paused ? "play.fill" : "pause.fill")
                 .frame(maxWidth: .infinity, minHeight: 44)
         }
         .buttonStyle(RepublicDockButton())
         .accessibilityHint("Pauses or resumes automatic days")
         Menu {
-            Button("Leisurely · 6 seconds") { clock.setPace(.playing(DayClockPolicy.leisurely)) }
-            Button("Steady · 3.5 seconds") { clock.setPace(.playing(DayClockPolicy.steady)) }
-            Button("Brisk · 2 seconds") { clock.setPace(.playing(DayClockPolicy.brisk)) }
+            Button("Slow · 6 seconds per day") { clock.setPace(.playing(DayClockPolicy.leisurely)) }
+            Button("Normal · 3.5 seconds per day") { clock.setPace(.playing(DayClockPolicy.steady)) }
+            Button("Fast · 2 seconds per day") { clock.setPace(.playing(DayClockPolicy.brisk)) }
         } label: {
             Image(systemName: "speedometer").frame(minWidth: 44, minHeight: 44)
         }
@@ -599,8 +611,8 @@ struct IslandView: View {
                 }
                 Spacer(minLength: 0)
                 Menu {
-                    Button("Field Guide & Journal", systemImage: "book.closed") { showJournal = true }
-                    Button("Start settlement tutorial", systemImage: "graduationcap") { startTutorial() }
+                    Button("Island notebook", systemImage: "book.closed") { showJournal = true }
+                    Button("Let’s build your town", systemImage: "graduationcap") { startTutorial() }
                         .disabled(game.state.blocksAdvance || game.saveIssue != nil)
                     Toggle("Building & resident notices", isOn: $mapNotices)
                     Button("Explain map icons", systemImage: "info.circle") { showNoticesHelp = true }
@@ -653,30 +665,39 @@ struct IslandView: View {
             } else if let hint = tool.isBuilding ? placementHint : game.feedback {
                 Text(hint).font(.caption).foregroundStyle(RepublicTheme.brass).lineLimit(2)
             } else if hungryResidents > 0 {
-                Button { showJournal = true } label: {
-                    Label("\(hungryResidents) hungry · check market access and food", systemImage: "exclamationmark.triangle.fill")
+                Button { performFocus(.overlay(.foodAccess)) } label: {
+                    Label("\(hungryResidents) neighbours need food", systemImage: "exclamationmark.triangle.fill")
                         .font(.caption2.weight(.semibold)).foregroundStyle(RepublicTheme.sand)
                         .frame(minHeight: 44, alignment: .leading)
                 }
                 .buttonStyle(.plain)
             }
             if unlockedBanner == nil && mapOverlay == .standard && game.saveIssue == nil && game.feedback == nil && !tool.isBuilding && hungryResidents == 0 {
-                Button { showJournal = true } label: {
+                Button { performFocus(islandPrompt.action) } label: {
                     HStack(spacing: 6) {
                         VStack(alignment: .leading, spacing: 2) {
                             if let result = dayResults.first, result.populationDelta > 0 || result.newlyOpened > 0 {
                                 Text(result.headline).fontWeight(.semibold).foregroundStyle(RepublicTheme.brass)
                             }
-                            Text("Next: \(developmentHint)").lineLimit(2)
+                            Text(developmentHint).lineLimit(2)
+                            Text(islandPrompt.button).foregroundStyle(RepublicTheme.brass)
                         }
-                        Image(systemName: "info.circle")
+                        Image(systemName: "arrow.right.circle")
                     }
                     .font(.caption2).foregroundStyle(RepublicTheme.paper.opacity(0.85))
                     .frame(minHeight: 44, alignment: .leading)
                 }
                 .buttonStyle(.plain)
-                .accessibilityHint("Opens current goals and recent day results")
+                .accessibilityHint("Take the next step on your island")
             }
+            }
+            if let islandMoment, game.state.day <= momentUntilDay {
+                HStack(alignment: .top) {
+                    Label(islandMoment, systemImage: "sparkles").font(.caption.weight(.medium))
+                    Spacer(minLength: 4)
+                    Button { self.islandMoment = nil } label: { Image(systemName: "xmark").frame(width: 44, height: 44) }
+                        .buttonStyle(.plain).accessibilityLabel("Dismiss town news")
+                }.foregroundStyle(RepublicTheme.brass)
             }
             if let seasonBanner {
                 Text(seasonBanner).font(.caption.weight(.bold)).foregroundStyle(RepublicTheme.brass)
@@ -736,7 +757,7 @@ struct IslandView: View {
             VStack(alignment: .leading, spacing: 3) {
                 Text("\(receipt.count) road tiles paved\(receipt.complete ? "" : " · stopped early")")
                     .font(.caption.weight(.bold))
-                Text("−$\(receipt.cost) · \(game.saveIssue == nil ? "Saved on this device" : "Not saved — see storage warning")")
+                Text("−$\(receipt.cost) · \(game.saveIssue == nil ? "Your island is saved." : "Not saved — see storage warning")")
                     .font(.caption2)
             }
             Spacer(minLength: 0)
@@ -763,7 +784,7 @@ struct IslandView: View {
                         .font(.caption.weight(.bold))
                     Text("−$\(receipt.cost) · \(receipt.opensOnDay > game.state.day ? "Opens day \(receipt.opensOnDay)" : "Now open")")
                         .font(.caption2)
-                    Text(game.saveIssue == nil ? "Saved on this device" : "Placed, but could not save. See the storage warning.")
+                    Text(game.saveIssue == nil ? "Your island is saved." : "Placed, but could not save. See the storage warning.")
                         .font(.caption2).foregroundStyle(RepublicTheme.paper.opacity(0.8))
                 }
                 Spacer(minLength: 0)
@@ -779,7 +800,7 @@ struct IslandView: View {
                 scene.setSelection(receipt.id)
                 scene.focus(on: receipt.anchor)
             } label: {
-                Label("View construction site", systemImage: "scope")
+                Label("Check the building", systemImage: "scope")
                     .font(.caption.weight(.semibold)).frame(minHeight: 44)
             }
             .buttonStyle(.plain)
@@ -799,35 +820,48 @@ struct IslandView: View {
         guard islandVisible, !tour.active, !game.state.blocksAdvance, game.saveIssue == nil else { return }
         guidedSeed = String(game.state.worldSeed)
         showFieldGuide = true
-        showJournal = true
+        showJournal = false
     }
 
     private var tutorialReadyForPolitics: Bool {
         guideLessons.first(where: { $0.id == "arrivals" })?.complete == true
     }
 
+    private var islandPrompt: IslandPrompt { IslandPrompt.make(in: game.state) }
+
     private var tutorialCoach: some View {
-        HStack(alignment: .top, spacing: 8) {
-            Button { showJournal = true } label: {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .top, spacing: 8) {
                 VStack(alignment: .leading, spacing: 4) {
-                    Label(tutorialReadyForPolitics ? "5. Meet your factions in Govern" : guideLessons.first(where: { !$0.complete })?.title ?? "5. Meet your factions in Govern",
-                          systemImage: "graduationcap.fill")
-                        .font(.caption.weight(.semibold)).foregroundStyle(RepublicTheme.brass)
-                    Text(tool.isBuilding ? "Move the preview beside a road. Green footprint → Place. Cancel exits without ordering."
-                         : placementReceipt != nil ? "Order received. Inspect the construction site; a foundation is not open yet."
-                         : "Tap for the next instruction and a direct tool. Pause the dock clock whenever you want time to read.")
-                        .font(.caption2).foregroundStyle(RepublicTheme.paper).multilineTextAlignment(.leading)
-                }.frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-            }.buttonStyle(.plain)
-                .accessibilityLabel("Tutorial: \(guideLessons.first(where: { !$0.complete })?.title ?? "Meet your factions in Govern"). Open instructions.")
-            Button(tutorialReadyForPolitics ? "Finish" : "Skip") { guidedSeed = "" }
-                .font(.caption).frame(minWidth: 44, minHeight: 44).buttonStyle(.plain)
-                .accessibilityLabel("Skip settlement tutorial; reopen it from Field Guide and Journal")
+                    Text(tutorialReadyForPolitics ? "Your town is growing" : islandPrompt.title)
+                        .font(.caption.weight(.bold)).foregroundStyle(RepublicTheme.brass)
+                    Text(tool.isBuilding ? "Find a spot beside the road. When the preview turns green, tap Build here."
+                         : tool == .road ? "Draw a route, then tap Lay road. Two fingers move the map."
+                         : tutorialReadyForPolitics ? "Meet the people behind your republic. Their worries will shape your next choices."
+                         : islandPrompt.message)
+                        .font(.caption).foregroundStyle(RepublicTheme.paper).fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: 0)
+                Button { guidedSeed = "" } label: { Image(systemName: "xmark").frame(width: 44, height: 44) }
+                    .buttonStyle(.plain).accessibilityLabel("Hide advice; return from the island menu")
+            }
+            if tool == .inspect {
+                HStack(spacing: 12) {
+                    Button(tutorialReadyForPolitics ? "Meet your people" : islandPrompt.button) {
+                        if tutorialReadyForPolitics { guidedSeed = ""; onGovern() }
+                        else { performFocus(islandPrompt.action) }
+                    }
+                    .font(.caption.weight(.semibold)).frame(minHeight: 44)
+                    .buttonStyle(.borderedProminent).tint(RepublicTheme.terracotta)
+                    .disabled(game.state.blocksAdvance || game.saveIssue != nil)
+                    Button("Tell me more") { showJournal = true }.font(.caption).frame(minHeight: 44).buttonStyle(.plain)
+                }
+            }
         }
     }
 
     private var developmentHint: String {
-        focusGoals.first?.title ?? "Review your island's next move"
+        islandPrompt.title
     }
 
     private func observeIsland(_ state: RepublicState) {
@@ -836,10 +870,22 @@ struct IslandView: View {
         let snapshot = CityDaySnapshot(state: state)
         guard let previous = dayBaseline, previous.seed == snapshot.seed else {
             dayBaseline = snapshot
-            dayResults = []
+            dayResults = []; islandMoment = nil
+            queuedBuilding = nil; queuedBuildingSeed = nil
             return
         }
         if let result = CityDayResult.compare(previous, snapshot) {
+            if result.populationDelta > 0 {
+                islandMoment = "\(result.populationDelta) new neighbours! Your little town is growing."
+            } else if result.newlyOpened > 0 {
+                let opened = state.buildings.first { snapshot.standing.contains($0.id) && !previous.standing.contains($0.id) }
+                islandMoment = opened.map { "Your \(($0.kind == .police ? "police station" : String(describing: $0.kind).lowercased())) is open. A new part of town is ready." }
+            } else if result.employmentDelta > 0 {
+                islandMoment = "\(result.employmentDelta) more neighbours are working today."
+            } else if result.fewerHungry > 0 {
+                islandMoment = result.hungry == 0 ? "Everyone is fed again. That’s a good day for the island." : "Fewer neighbours are going hungry. Keep it up."
+            }
+            if result.populationDelta > 0 || result.newlyOpened > 0 || result.employmentDelta > 0 || result.fewerHungry > 0 { momentUntilDay = state.day + 1 }
             dayResults.insert(result, at: 0)
             dayResults = Array(dayResults.prefix(6))
             dayBaseline = snapshot
@@ -861,6 +907,18 @@ struct IslandView: View {
             return
         }
         guard let action else { return }
+        performFocus(action)
+    }
+
+    private func finishCatalog() {
+        let kind = queuedBuilding
+        let seed = queuedBuildingSeed
+        queuedBuilding = nil; queuedBuildingSeed = nil
+        guard islandVisible, appPhase == .active, seed == game.state.worldSeed, let kind else { return }
+        performFocus(.build(kind))
+    }
+
+    private func performFocus(_ action: CityFocusAction) {
         if game.state.blocksAdvance { presentAttention(); return }
         switch action {
         case .build(let kind):
@@ -869,6 +927,8 @@ struct IslandView: View {
             leaveBuildSession()
             tool = option
             showCatalog = false
+            placeTile = IslandPrompt.suggestedSite(for: kind, in: game.state)
+            if let placeTile { scene.focus(on: placeTile) }
             configureTapHandler()
         case .inspect(let id): inspectCitizenBuilding(id)
         case .overlay(let mode): tool = .inspect; mapOverlay = mode
@@ -1136,11 +1196,11 @@ struct IslandView: View {
         VStack(alignment: .leading, spacing: 4) {
             Menu {
                 Button("Paused") { clock.setPace(.paused) }
-                Button("Leisurely · 6 seconds") { clock.setPace(.playing(DayClockPolicy.leisurely)) }
-                Button("Steady · 3.5 seconds") { clock.setPace(.playing(DayClockPolicy.steady)) }
-                Button("Brisk · 2 seconds") { clock.setPace(.playing(DayClockPolicy.brisk)) }
+                Button("Slow · 6 seconds per day") { clock.setPace(.playing(DayClockPolicy.leisurely)) }
+                Button("Normal · 3.5 seconds per day") { clock.setPace(.playing(DayClockPolicy.steady)) }
+                Button("Fast · 2 seconds per day") { clock.setPace(.playing(DayClockPolicy.brisk)) }
             } label: {
-                Label(clock.policy.controlLabel, systemImage: clock.policy.tickInterval == nil ? "pause.fill" : "play.fill")
+                Label(clockButtonTitle, systemImage: clock.policy.tickInterval == nil ? "pause.fill" : "play.fill")
                     .font(.caption.weight(.semibold))
                     .frame(maxWidth: .infinity, minHeight: 36)
             }
@@ -1153,57 +1213,15 @@ struct IslandView: View {
     }
 
     @ViewBuilder private func toolStrip(compact: Bool, narrow: Bool) -> some View {
-        if narrow {
-            HStack(spacing: 4) {
-                narrowToolButton(.inspect)
-                narrowToolButton(.road)
-                Menu {
-                    ForEach(CityTool.buildings) { option in
-                        Button(option.label, systemImage: option.symbol) {
-                            tool = option
-                            configureTapHandler()
-                        }
-                    }
-                } label: {
-                    Image(systemName: "building.2.fill")
-                        .frame(maxWidth: .infinity, minHeight: 44)
-                }
-                .buttonStyle(.borderedProminent)
-                .tint(tool.isBuilding ? RepublicTheme.brass : RepublicTheme.panel)
-                .accessibilityLabel("Buildings tool")
-            }
-            .padding(4)
-            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
-        } else if compact {
-            HStack(spacing: 6) {
-                toolButton(.inspect)
-                toolButton(.road)
-                Menu {
-                    ForEach(CityTool.buildings) { option in
-                        Button(option.label, systemImage: option.symbol) {
-                            tool = option
-                            configureTapHandler()
-                        }
-                    }
-                } label: {
-                    Label(tool.isBuilding ? tool.label : "Buildings", systemImage: "building.2.fill")
-                        .font(.caption.weight(.semibold))
-                        .frame(maxWidth: .infinity, minHeight: 44)
-                }
-                .buttonStyle(.borderedProminent)
-                .tint(tool.isBuilding ? RepublicTheme.brass : RepublicTheme.panel)
-            }
-            .padding(5)
-            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
-        } else {
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 5) {
-                    ForEach(CityTool.allCases) { option in toolButton(option) }
-                }
-                .padding(5)
-            }
-            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
-        }
+        HStack(spacing: 8) {
+            toolButton(.inspect)
+            Button {
+                leaveBuildSession(); queuedBuilding = nil; showCatalog = true
+            } label: {
+                Label("Build", systemImage: "hammer.fill").frame(maxWidth: .infinity, minHeight: 44)
+            }.buttonStyle(.borderedProminent).tint(RepublicTheme.panel)
+            toolButton(.road)
+        }.padding(6)
     }
 
     private func narrowToolButton(_ option: CityTool) -> some View {
@@ -1414,7 +1432,7 @@ struct IslandView: View {
     }
 
     private var cardOpen: Bool {
-        showCatalog || selectedAgenda != nil || game.state.pending != nil || buildingInspection != nil || selectedCitizen != nil || tool.isBuilding
+        selectedAgenda != nil || game.state.pending != nil || buildingInspection != nil || selectedCitizen != nil || tool.isBuilding
     }
 
     private var detailOpen: Bool {
@@ -1467,7 +1485,7 @@ struct IslandView: View {
             }
         } else {
             canPlace = false
-            verdict = "Drag with one finger to choose a site. Two fingers pan or zoom."
+            verdict = "Drag the preview to a spot beside the road. Use two fingers to move the map."
         }
         return VStack(alignment: .leading, spacing: 6) {
             Text("\(tool.label) · $\(kind?.buildCost ?? 0)")
@@ -1481,9 +1499,10 @@ struct IslandView: View {
                     .font(.caption.weight(.semibold)).frame(minHeight: 44)
             }
             if let kind {
-                Text("\(kind.footprint.width)×\(kind.footprint.height) tiles · Treasury after: $\(game.state.treasury - kind.buildCost)")
+                Text(game.state.treasury >= kind.buildCost ? "You’ll have $\(game.state.treasury - kind.buildCost) left." : "You need $\(kind.buildCost - game.state.treasury) more.")
                     .font(.caption2).foregroundStyle(.secondary)
             }
+            DisclosureGroup("Adjust by one square", isExpanded: $showBuildHelp) {
             ViewThatFits(in: .horizontal) {
                 HStack(spacing: 8) {
                     nudgeButton("west", symbol: "arrow.up.left", dx: -1, dy: 0)
@@ -1502,8 +1521,9 @@ struct IslandView: View {
                     }
                 }
             }
-            Text("Finished-building preview · arrows move one tile · Place confirms.")
-                .font(.caption2.weight(.semibold)).foregroundStyle(.secondary)
+            }
+            Text("Nothing is bought until you tap Build here.")
+                .font(.caption2).foregroundStyle(.secondary)
         }
     }
 
@@ -1511,7 +1531,7 @@ struct IslandView: View {
         let kind = tool.buildingKind
         let canPlace = canConfirmPlacement
         return HStack {
-                Button("Place · $\(kind?.buildCost ?? 0)") {
+                Button("Build here · $\(kind?.buildCost ?? 0)") {
                     guard let kind, let placeTile else { return }
                     guard game.send(.placeBuilding(kind, at: placeTile)),
                           let id = game.state.map.buildingAt(placeTile) else {
@@ -1576,15 +1596,15 @@ struct IslandView: View {
         let fresh = roadMarks.filter { $0.accepted && !game.state.map.isRoad(at: $0.tile) }.count
         let blocked = roadMarks.contains { !$0.accepted }
         return VStack(alignment: .leading, spacing: 6) {
-            Text(fresh > 0 ? "Pave \(fresh) · $\(fresh * 10)" : "Drag a road. Two fingers pan and pinch.")
+            Text(fresh > 0 ? "Lay \(fresh) road squares · $\(fresh * 10)" : "Draw the road with one finger. Use two fingers to move the map.")
                 .font(.caption.weight(.semibold))
             if blocked {
-                Text("A red tile fails the road rule or the treasury. Pave stops there.")
+                Text("A red square is blocked or too expensive. The road will stop before it.")
                     .font(.caption2)
                     .foregroundStyle(.orange)
             }
             HStack {
-                Button("Pave") { paveDraft() }
+                Button("Lay road") { paveDraft() }
                     .buttonStyle(.borderedProminent)
                     .disabled(fresh == 0 || game.saveIssue != nil)
                 Button("Cancel") {
@@ -1599,55 +1619,59 @@ struct IslandView: View {
     }
 
     private var catalog: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            catalogRow("Homes", [.house])
-            catalogRow("Food", [.farm, .market])
-            catalogRow("Work", [.workshop, .dock])
-            catalogRow("Services", [.clinic, .school, .police])
-            if DevelopmentTree.isEnabled(in: game.state) {
-                Button("View unlock requirements") {
-                    showCatalog = false
-                    showRoadmap = true
-                }.font(.caption.weight(.semibold)).frame(minHeight: 44)
-            }
-            Text("Services draw their real reach. A site shows why it cannot be built.")
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-        }
+        VStack(alignment: .leading, spacing: 12) {
+            Text("What does your island need?").font(RepublicTheme.heading(.title2))
+            Text("Choose a building, then find its place on the island. Time waits while you choose.")
+                .font(.subheadline).foregroundStyle(RepublicTheme.inkSoft)
+            ForEach(CityTool.buildings.filter { option in
+                option.buildingKind.map { DevelopmentTree.canBuild($0, in: game.state) } ?? false
+            }) { option in buildCard(option, available: true) }
+            DisclosureGroup("Coming later") {
+                VStack(spacing: 10) {
+                    ForEach(CityTool.buildings.filter { option in
+                        option.buildingKind.map { !DevelopmentTree.canBuild($0, in: game.state) } ?? false
+                    }) { option in buildCard(option, available: false) }
+                }.padding(.top, 10)
+            }.font(.subheadline)
+        }.foregroundStyle(RepublicTheme.ink)
     }
 
-    private func catalogRow(_ title: String, _ tools: [CityTool]) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(title).font(.caption.weight(.bold))
-            HStack(spacing: 6) {
-                ForEach(tools) { option in
-                    Button {
-                        tool = option
-                        showCatalog = false
-                        configureTapHandler()
-                    } label: {
-                        VStack(spacing: 5) {
-                            if let kind = option.buildingKind {
-                                Image(BuildingSpriteCatalog.spec(for: kind).imageName)
-                                    .resizable().scaledToFit().frame(height: 46)
-                                    .accessibilityHidden(true)
-                                Label(option.label, systemImage: DevelopmentTree.canBuild(kind, in: game.state) ? "hammer.fill" : "lock.fill")
-                                    .font(.caption.weight(.semibold))
-                                if let reason = DevelopmentTree.lockReason(for: kind, in: game.state) {
-                                    Text(reason).font(.caption2).fixedSize(horizontal: false, vertical: true)
-                                }
-                                Text("$\(kind.buildCost) · \(game.state.config.constructionDays(for: kind)) days")
-                                    .font(.caption2).foregroundStyle(.secondary)
+    private func buildCard(_ option: CityTool, available: Bool) -> some View {
+        Button {
+            guard let kind = option.buildingKind, available else { return }
+            queuedBuilding = kind
+            queuedBuildingSeed = game.state.worldSeed
+            showCatalog = false
+        } label: {
+            HStack(spacing: 14) {
+                if let kind = option.buildingKind {
+                    Image(BuildingSpriteCatalog.spec(for: kind).imageName)
+                        .resizable().scaledToFit().frame(width: 66, height: 76).accessibilityHidden(true)
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text(option.label).font(.headline)
+                        Text(IslandPrompt.purpose(kind)).font(.subheadline)
+                        if available {
+                            let days = game.state.config.constructionDays(for: kind)
+                            Text(days == 0 ? "$\(kind.buildCost) · Opens right away" : "$\(kind.buildCost) · Ready in \(days) days")
+                                .font(.caption.weight(.semibold)).foregroundStyle(RepublicTheme.inkSoft)
+                            if game.state.treasury < kind.buildCost {
+                                Text("You need $\(kind.buildCost - game.state.treasury) more.").font(.caption).foregroundStyle(RepublicTheme.terracotta)
                             }
+                            if case .build(let needed) = islandPrompt.action, needed == kind {
+                                Label("Your neighbours could use this", systemImage: "star.fill")
+                                    .font(.caption2.weight(.semibold)).foregroundStyle(RepublicTheme.fertile)
+                            }
+                        } else {
+                            Text(DevelopmentTree.lockReason(for: kind, in: game.state) ?? "Keep growing your town.")
+                                .font(.caption).foregroundStyle(RepublicTheme.inkSoft)
                         }
-                        .padding(8)
-                        .frame(maxWidth: .infinity, minHeight: 88)
-                    }
-                    .buttonStyle(.bordered)
-                    .disabled(option.buildingKind.map { !DevelopmentTree.canBuild($0, in: game.state) } ?? false)
+                    }.fixedSize(horizontal: false, vertical: true)
+                    Spacer(minLength: 0)
+                    Image(systemName: available ? "chevron.right" : "lock.fill").font(.caption)
                 }
-            }
-        }
+            }.padding(12).frame(maxWidth: .infinity, minHeight: 92, alignment: .leading)
+            .background(RepublicTheme.sand.opacity(available ? 0.24 : 0.12), in: RoundedRectangle(cornerRadius: 12))
+        }.buttonStyle(.plain).disabled(!available || game.saveIssue != nil)
     }
 
     private func paveDraft() {
@@ -1821,7 +1845,14 @@ private enum CityTool: String, CaseIterable, Identifiable {
     case inspect, road, house, farm, market, clinic, school, police, workshop, dock
     static let buildings = allCases.filter { $0 != .inspect && $0 != .road }
     var id: String { rawValue }
-    var label: String { rawValue.capitalized }
+    var label: String {
+        switch self {
+        case .inspect: return "Look"
+        case .house: return "Home"
+        case .police: return "Police station"
+        default: return rawValue.capitalized
+        }
+    }
     var isBuilding: Bool { self != .inspect && self != .road }
     var symbol: String {
         switch self {
@@ -1952,8 +1983,8 @@ private struct IslandJournalPanel: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
             fieldGuide
-            Text("Your next move").font(RepublicTheme.heading(.title2))
-            Text("These are suggestions from the town's current needs. Build in your own order; residents handle their own jobs.")
+            Text("What next?").font(RepublicTheme.heading(.title2))
+            Text("A few things your neighbours could use. Choose what matters to you; they will find their own jobs.")
                 .font(.subheadline).foregroundStyle(RepublicTheme.inkSoft)
             ForEach(goals) { goal in
                 VStack(alignment: .leading, spacing: 10) {
@@ -1969,7 +2000,7 @@ private struct IslandJournalPanel: View {
                         .frame(minHeight: 44).buttonStyle(.borderedProminent).tint(RepublicTheme.terracotta)
                 }.dioramaCard()
             }
-            Text("Recent days").font(RepublicTheme.heading(.title2))
+            Text("While you were building").font(RepublicTheme.heading(.title2))
             if results.isEmpty {
                 Text("The first day result appears after the clock advances. Net changes include your building orders and policy decisions.")
                     .font(.subheadline).foregroundStyle(RepublicTheme.inkSoft)
@@ -1981,7 +2012,7 @@ private struct IslandJournalPanel: View {
                     Text(result.headline).font(RepublicTheme.heading(.headline))
                     LazyVGrid(columns: [GridItem(.adaptive(minimum: 130), alignment: .leading)], alignment: .leading, spacing: 8) {
                         stat("Residents", signed(Int64(result.populationDelta)), positive: result.populationDelta >= 0)
-                        stat("Net treasury", money(result.treasuryDelta), positive: result.treasuryDelta >= 0)
+                        stat("Money change", money(result.treasuryDelta), positive: result.treasuryDelta >= 0)
                         stat("Food stock", signed(result.foodDelta), positive: result.foodDelta >= 0)
                         stat("Happiness", "\(signed(Int64(result.happinessDelta))) pts", positive: result.happinessDelta >= 0)
                         stat("Working residents", signed(Int64(result.employmentDelta)), positive: result.employmentDelta >= 0)
@@ -1997,8 +2028,8 @@ private struct IslandJournalPanel: View {
             }
             Text("These are the last six day results from this visit. Gazette keeps the detailed city events.")
                 .font(.caption).foregroundStyle(RepublicTheme.inkSoft)
-            Toggle("Opening tour for new islands", isOn: $automaticTours)
-            Button("Take a short island tour", action: onTour)
+            Toggle("Show me around new islands", isOn: $automaticTours)
+            Button("Show me around", action: onTour)
                 .frame(minHeight: 44).buttonStyle(.bordered).disabled(!canTour)
             Text("Tours pause the clock and can be skipped. Finish any active building or road session before replaying.")
                 .font(.caption).foregroundStyle(RepublicTheme.inkSoft)
@@ -2007,14 +2038,14 @@ private struct IslandJournalPanel: View {
 
     private var fieldGuide: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Toggle("Founder's field guide", isOn: $showGuide)
+            Toggle("Getting your town started", isOn: $showGuide)
                 .font(RepublicTheme.heading(.title3))
             if showGuide {
                 Text("Learn by building. These checks describe the town right now, so they can change as residents arrive. No timers, extra fees or tutorial rewards.")
                     .font(.subheadline).foregroundStyle(RepublicTheme.inkSoft)
                 Text("\(lessons.filter(\.complete).count) of \(lessons.count) conditions ready")
                     .font(.caption.weight(.semibold))
-                Button("Start / resume the on-map tutorial", action: onGuide)
+                Button("Show the advice on my island", action: onGuide)
                     .frame(minHeight: 44).buttonStyle(.bordered)
                 ForEach(lessons) { lesson in lessonCard(lesson) }
                 Text("5. Govern with consequences")
@@ -2036,8 +2067,8 @@ private struct IslandJournalPanel: View {
             set: { expandedLesson = $0 ? lesson.id : nil }
         )) {
             VStack(alignment: .leading, spacing: 10) {
-                Text(lesson.instruction).fixedSize(horizontal: false, vertical: true)
-                Text(lesson.evidence).font(.caption.weight(.semibold))
+                Text(IslandPrompt.lesson(lesson.id)).fixedSize(horizontal: false, vertical: true)
+                Text(lesson.evidence.replacingOccurrences(of: "standing", with: "finished")).font(.caption.weight(.semibold))
                 if !lesson.complete {
                     Button(lesson.actionLabel) { onGoal(lesson.action) }
                         .frame(minHeight: 44).buttonStyle(.bordered)
@@ -2083,7 +2114,7 @@ private struct FoundingTourOverlay: View {
         }
     }
     private var continueButton: some View {
-        Button(beat == 2 ? "Start settlement tutorial" : "Continue", action: onContinue)
+        Button(beat == 2 ? "Let’s build your town" : "Continue", action: onContinue)
             .frame(minWidth: 120, maxWidth: .infinity, minHeight: 44).buttonStyle(.borderedProminent).tint(RepublicTheme.terracotta)
     }
     var body: some View {
@@ -2124,6 +2155,89 @@ private struct FoundingTourOverlay: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(Color.black.opacity(0.001))
             .accessibilityElement(children: .contain)
+        }
+    }
+}
+
+/// A short local voice for the existing, real needs; not a new quest or reward.
+struct IslandPrompt {
+    let title: String
+    let message: String
+    let button: String
+    let action: CityFocusAction
+
+    static func make(in state: RepublicState) -> IslandPrompt {
+        let goals = CityFocusReader.goals(in: state)
+        let goal = goals.first!
+        let people = state.citizens.filter(\.alive)
+        let outOfWork = people.filter { $0.work == nil }.count
+        if goal.id == "rehousing" {
+            return Self(title: "Some neighbours need a home", message: "Let’s get them settled. A finished house gives them somewhere to live.", button: goal.actionLabel, action: goal.action)
+        }
+        if goal.id == "food" {
+            return Self(title: "People are going hungry", message: "Let’s check their market. Food needs a road to their homes, and they need money to buy it.", button: "Check their food", action: goal.action)
+        }
+        if goal.id.hasPrefix("site-") {
+            return Self(title: "The builders are at work", message: "It opens after a few days of building. You can plan the next street while they finish.", button: "Check progress", action: goal.action)
+        }
+        if goal.id.hasPrefix("jobs") {
+            return Self(title: "\(outOfWork) neighbours are looking for work", message: goal.id == "jobs-access" ? "There are jobs waiting. Make sure their homes and workplaces share a road; they’ll take it from there." : "A workshop gives people a living and your town room to grow. Let’s find a spot beside the road.", button: goal.id == "jobs-access" ? "Show the jobs" : "Build a workshop", action: goal.action)
+        }
+        if goal.id == "housing" {
+            return Self(title: "Make room for new neighbours", message: "Your homes are full. One more house is the start of a new street.", button: "Build a home", action: goal.action)
+        }
+        if goal.id == "happiness" {
+            return Self(title: "Your neighbours could be happier", message: "Let’s look at what’s bothering them before spending more money.", button: "See how they’re doing", action: goal.action)
+        }
+        if goal.id == "supply-network" {
+            return Self(title: "Get ready for new neighbours", message: goal.detail.replacingOccurrences(of: "spare home", with: "empty home").replacingOccurrences(of: "workplace", with: "place to work"), button: "See what’s missing", action: goal.action)
+        }
+        if goal.id == "arrivals" {
+            return Self(title: "There’s room to grow", message: "Homes, work and food are ready. Keep them that way and new neighbours can arrive at the next check.", button: "Who’s moving in?", action: goal.action)
+        }
+        return Self(title: "What kind of island will you build?", message: "A busy harbour, a close-knit town, or a little of both. Your next steps are yours to choose.", button: "See what’s next", action: goal.action)
+    }
+
+    /// A legal starting preview near town. Never places, charges or reserves it.
+    static func suggestedSite(for kind: BuildingKind, in state: RepublicState) -> TileIndex? {
+        let centre = state.buildings.first(where: { $0.kind == .townHall })?.anchor
+            ?? state.map.index(x: state.map.width / 2, y: state.map.height / 2)
+        func distance(_ tile: TileIndex) -> Int32 {
+            let dx = state.map.x(of: tile) - state.map.x(of: centre)
+            let dy = state.map.y(of: tile) - state.map.y(of: centre)
+            return abs(dx) + abs(dy)
+        }
+        var choices = (0..<state.map.tileCount).map { TileIndex(Int32($0)) }
+        choices.sort { left, right in
+            let a = distance(left), b = distance(right)
+            return a == b ? left.raw < right.raw : a < b
+        }
+        return choices.first {
+            if case .valid = SimulationEngine.validatePlacement(kind, at: $0, in: state) { return true }
+            return false
+        }
+    }
+
+    static func lesson(_ id: String) -> String {
+        switch id {
+        case "work": return "Choose a workshop and find a spot beside the road. Tap Build here when you’re happy with it. The builders will get started, and neighbours will take the jobs once it opens."
+        case "homes": return "Build another home beside a road. Give the builders a couple of days, and you’ll have room to welcome new neighbours."
+        case "supply": return "Take a look at the farm and market. A full storehouse is only useful if people can get to the market and afford their meals."
+        default: return "Keep a home, a job and enough food ready. When people are happy with life here, more neighbours can join you. The island checks every few days."
+        }
+    }
+
+    static func purpose(_ kind: BuildingKind) -> String {
+        switch kind {
+        case .house: return "A home for \(kind.housingCapacity) neighbours."
+        case .workshop: return "Creates \(kind.workerCapacity) jobs for your town."
+        case .farm: return "Grow food for the island. Needs fertile ground."
+        case .market: return "Bring food within reach of nearby homes."
+        case .clinic: return "Care for the people in your neighbourhood."
+        case .school: return "Give your growing community a school."
+        case .police: return "Help keep the neighbourhood safe."
+        case .dock: return "Open the island to trade."
+        case .townHall: return "The heart of your republic."
         }
     }
 }

@@ -6,15 +6,26 @@ struct MainView: View {
     @EnvironmentObject private var game: Game
     @EnvironmentObject private var clock: DayClock
     @State private var tab = 0
+    @AppStorage("pocket.republic.tutorial.active-seed.v1") private var guidedSeed = ""
     @State private var confirmNewCity = false
     @State private var showSaveManager = false
 
     var body: some View {
-        TabView(selection: $tab) {
-            island.tabItem { Label("Island", systemImage: "map.fill") }.tag(0)
-            people.tabItem { Label("People", systemImage: "person.3.fill") }.tag(1)
-            govern.tabItem { Label("Govern", systemImage: "building.columns.fill") }.tag(2)
-            events.tabItem { Label("Gazette", systemImage: "newspaper.fill") }.tag(3)
+        ZStack {
+            island.opacity(tab == 0 ? 1 : 0).allowsHitTesting(tab == 0).accessibilityHidden(tab != 0)
+            if tab == 1 { people }
+            if tab == 2 { govern }
+            if tab == 3 { events }
+        }
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            HStack(spacing: 4) {
+                navigationButton(0, "Island", "map.fill")
+                navigationButton(1, "People", "person.3.fill")
+                navigationButton(2, "Govern", "building.columns.fill")
+                navigationButton(3, "News", "newspaper.fill")
+            }
+            .padding(.horizontal, 8).padding(.vertical, 6)
+            .background(RepublicTheme.panel)
         }
         .tint(RepublicTheme.brass)
         .onChange(of: game.state.pending?.id) { _, pendingID in
@@ -46,6 +57,22 @@ struct MainView: View {
         }
     }
 
+    private func navigationButton(_ value: Int, _ title: String, _ symbol: String) -> some View {
+        Button {
+            tab = value
+            if value == 2, SettlementGuide.lessons(in: game.state).first(where: { $0.id == "arrivals" })?.complete == true {
+                guidedSeed = ""
+            }
+        } label: {
+            VStack(spacing: 4) {
+                Image(systemName: symbol).font(.system(size: 16, weight: .semibold))
+                Text(title).font(.caption2.weight(.semibold))
+            }.frame(maxWidth: .infinity, minHeight: 48)
+            .foregroundStyle(tab == value ? RepublicTheme.brass : RepublicTheme.paper)
+            .background(tab == value ? RepublicTheme.brass.opacity(0.13) : Color.clear, in: RoundedRectangle(cornerRadius: 10))
+        }.buttonStyle(.plain).accessibilityAddTraits(tab == value ? .isSelected : [])
+    }
+
     private var island: some View {
         NavigationStack {
             IslandView(islandVisible: tab == 0, onGovern: { tab = 2 }, onReady: onIslandReady)
@@ -69,8 +96,12 @@ struct MainView: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: RepublicTheme.Space.lg) {
-                    DevelopmentRoadmap()
+                    Text("A town to look after").font(RepublicTheme.heading(.title2)).foregroundStyle(RepublicTheme.ink)
+                    Text("Listen to your neighbours. Decide what kind of place this will become.")
+                        .font(.subheadline).foregroundStyle(RepublicTheme.inkSoft)
                     DecreeBoard()
+                    DisclosureGroup("Where could we go next?") { DevelopmentRoadmap() }
+                        .foregroundStyle(RepublicTheme.ink)
                     save
                 }
                 .padding(RepublicTheme.Space.md)
@@ -191,14 +222,14 @@ struct CitySaveControls: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text("On this device").font(.title2.weight(.bold))
-            Text("One current island and one verified rolling backup. Autosave runs after accepted actions and daily updates.")
+            Text("Your island saves as you play. You can also go back to the previous save if you need to.")
                 .font(.subheadline)
             if let issue = game.saveIssue {
                 Label(issue, systemImage: "exclamationmark.triangle.fill").foregroundStyle(RepublicTheme.alert)
                 if game.canRetrySave {
                     Button("Retry Save") { game.retrySave() }
                         .frame(minHeight: 44).buttonStyle(.borderedProminent)
-                    Text("Retry Save writes the current in-memory city. Do not reload if you want to keep unsaved changes.").font(.caption)
+                    Text("Try saving again to keep the changes you’ve just made. Loading an older save would lose them.").font(.caption)
                 } else {
                     Button("Retry Load") { Task { _ = await game.retryLoad() } }
                         .frame(minHeight: 44).buttonStyle(.bordered)
@@ -213,19 +244,19 @@ struct CitySaveControls: View {
             }
             if let backup = game.backupPreview {
                 VStack(alignment: .leading, spacing: 8) {
-                    Label("Verified backup · Day \(backup.day)", systemImage: "clock.arrow.circlepath").font(.headline)
+                    Label("Previous save · Day \(backup.day)", systemImage: "clock.arrow.circlepath").font(.headline)
                     Text("\(backup.residents) residents").font(.subheadline)
                     if let date = backup.savedAt { Text(date.formatted(date: .abbreviated, time: .shortened)).font(.caption) }
                     Button("Restore this backup", role: .destructive) { confirmRestore = true }
                         .frame(minHeight: 44).buttonStyle(.bordered)
-                    Text("Restoring replaces the selected city and discards changes made after that save. The backup may be only one autosave older; it is not a list of save slots.").font(.caption)
+                    Text("Go back to this point in your island’s story. Anything you did after it will be lost. We keep one previous save, not a list of islands.").font(.caption)
                 }.padding(12).background(.thinMaterial, in: RoundedRectangle(cornerRadius: 12))
             } else {
-                Text("No verified backup is available yet. A backup appears after a different valid city state is saved.").font(.caption)
+                Text("Your previous save will appear here after you’ve played a little longer.").font(.caption)
             }
             if let feedback = game.feedback { Text(feedback).font(.caption).foregroundStyle(RepublicTheme.brass) }
             if game.busy { ProgressView("Checking and restoring the island…") }
-            Text("A file that cannot be verified is not automatically replaced. New City and Restore are deliberate choices. This browser does not import older prototype saves or cloud saves.")
+            Text("If a save won’t open, we keep it safe. Your saves stay on this device.")
                 .font(.caption).foregroundStyle(.secondary)
         }
         .disabled(game.busy)

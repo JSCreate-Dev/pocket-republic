@@ -1,0 +1,11 @@
+# 2026-11-10 10:41 EST — Ios Dev — ui/island-first-play
+
+Base: actual integrated 87c7a55, run 42837822198. Reviewed the supplied short screen recording locally; no recording/screenshots are included in the handoff.
+
+- Replaced nested shallow catalog with full-height, flat illustrated picker and closed locked-building section. Rectangular plain-style rows avoid oversized system pill shapes. Queued tool activation occurs after dismissal; seed/visibility/save/lock guards and catalog hold protect it.
+- Put need → direct action on the map. Notebook is optional, not a required tutorial stop. Legal near-town preview comes from actual placement validation, does not reserve/pay/build and stays movable/cancellable.
+- Replaced adaptive native side tabs with four labelled bottom destinations. Keep map/camera alive, pause hidden scene animation, reset through existing citySession on restore/new city. Other reading pages are recreated on switching and may return to their top.
+- Made placement Build here/Cancel the primary choice; precision nudges optional. Added real short town feedback on openings/arrivals/employment/food improvement, never fake happiness/grants. Main clock label says Play/Pause/Waiting; underlying pace values unchanged.
+- Put people and requests first in Govern; roadmap remains available. Decree display titles are human-readable aliases; stable title/name fields still drive enactment/cooldowns. Wrote less technical notebook/road/save wording without weakening destructive confirmation or financial facts.
+- Verified actual prompt/preview scenarios by compiling app reader with genuine core source, read-only state hash, deterministic legal preview, pending-work routing, jobs/housing/food. Reused identical validated core objects for actual decree/tour/save/clock/light harnesses. Parser/whitespace pass. No iOS SDK/typecheck, visual render or device test claimed; core remains byte-for-byte identical to 193-test validated source.
+- Phone pass: four-destination nav and map focus in portrait/landscape/folds; picker scrolling/cancel/locked rows/budget; queued action after dismissal/background/new seed; preview placement/cancel; intro/loader and save restoration; guide hide/reopen and Gov completion; dynamic text/VoiceOver; no lost clock holds; news density. Run Xcode CI before IPA distribution.

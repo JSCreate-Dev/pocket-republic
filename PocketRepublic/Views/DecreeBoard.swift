@@ -13,11 +13,11 @@ struct DecreeBoard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: RepublicTheme.Space.lg) {
+            FactionCouncilPanel()
+            council
             standing
             tax
-            FactionCouncilPanel()
             decrees
-            council
         }
         .foregroundStyle(RepublicTheme.ink)
         .confirmationDialog("Issue this decree?", isPresented: Binding(
@@ -82,9 +82,9 @@ struct DecreeBoard: View {
         VStack(alignment: .leading, spacing: RepublicTheme.Space.sm) {
             Text("Decrees")
                 .font(RepublicTheme.heading(.title3))
-            Text("Your standing powers: spend once for immediate measures, or change a lasting policy. Faction approval is political support, not an instant happiness bonus. Each decree has a \(game.state.config.effectiveDecreeCooldownDays)-day cooldown.")
+            Text("Shape life on your island. Some choices cost money once; others change taxes or pay until you change them again. Each decree has a \(game.state.config.effectiveDecreeCooldownDays)-day cooldown.")
                 .font(RepublicTheme.body(.subheadline)).foregroundStyle(RepublicTheme.inkSoft)
-            Text("▲ gains faction approval · ▼ loses approval · more arrows mean a larger change.")
+            Text("▲ They approve · ▼ They object. More arrows mean a stronger reaction.")
                 .font(RepublicTheme.body(.caption)).foregroundStyle(RepublicTheme.inkSoft)
             if let error = decreeError {
                 Label(error, systemImage: "exclamationmark.triangle")
@@ -114,7 +114,7 @@ struct DecreeBoard: View {
             return rank(lhs) < rank(rhs)
         }
         if !items.isEmpty {
-            Text("Before the council")
+            Text("On your desk")
                 .font(RepublicTheme.heading(.title3))
             ForEach(items) { item in
                 councilCard(item)
@@ -131,7 +131,7 @@ struct DecreeBoard: View {
             } label: {
                 HStack(alignment: .firstTextBaseline, spacing: RepublicTheme.Space.sm) {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(card.title)
+                        Text(card.displayTitle)
                             .font(RepublicTheme.heading(.headline))
                             .multilineTextAlignment(.leading)
                             .fixedSize(horizontal: false, vertical: true)
@@ -158,7 +158,7 @@ struct DecreeBoard: View {
                 .background(RepublicTheme.sand.opacity(0.35), in: RoundedRectangle(cornerRadius: RepublicTheme.Space.chip, style: .continuous))
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("\(card.title), \(card.costLabel)")
+            .accessibilityLabel("\(card.displayTitle), \(card.costLabel)")
 
             if open {
                 decreeDetail(card)
@@ -174,11 +174,11 @@ struct DecreeBoard: View {
             if let reason = card.availability {
                 Text(reason).font(RepublicTheme.body(.subheadline)).foregroundStyle(RepublicTheme.alert)
             }
-            Text("For your island now").font(RepublicTheme.heading(.subheadline))
+            Text("On your island right now").font(RepublicTheme.heading(.subheadline))
             ForEach(card.context, id: \.self) { line in
                 Text(line).font(RepublicTheme.body(.subheadline)).fixedSize(horizontal: false, vertical: true)
             }
-            Text("Exact effects").font(RepublicTheme.heading(.subheadline))
+            Text("What will change").font(RepublicTheme.heading(.subheadline))
             if let shortfall = card.shortfall {
                 Text("Need \(shortfall) more")
                     .font(RepublicTheme.body(.caption).weight(.semibold))
@@ -224,7 +224,7 @@ struct DecreeBoard: View {
         let day = game.state.day
         if game.send(.issueDecree(card.title)) {
             decreeError = nil
-            decreeReceipt = "\(card.title) issued on Day \(day) · \(card.costLabel). \(card.duration)"
+            decreeReceipt = "\(card.displayTitle) · Day \(day) · \(card.costLabel). \(card.duration)"
             openDecree = card.title
         } else {
             decreeError = game.saveIssue ?? game.feedback ?? "Could not issue the decree."
@@ -258,6 +258,19 @@ struct DecreeCardReading: Identifiable {
     }
 
     var title: String
+    var displayTitle: String {
+        switch title {
+        case "Decree bread rationing": return "Bring in emergency food"
+        case "Proclaim a market festival": return "Hold a market festival"
+        case "Purge the graft registers": return "Root out corruption"
+        case "Raise the civic wage": return "Raise public workers’ pay"
+        case "Declare a tax holiday": return "Ease income taxes"
+        case "Levy an emergency rate": return "Raise income taxes"
+        case "Impose a night curfew": return "Crack down on unrest"
+        case "Order a public works season": return "Give neglected districts some care"
+        default: return title
+        }
+    }
     var purpose: String
     var duration: String
     var caution: String
@@ -478,7 +491,7 @@ private struct FactionCouncilPanel: View {
         VStack(alignment: .leading, spacing: 12) {
             Label("People behind the politics", systemImage: "person.3.fill")
                 .font(RepublicTheme.heading(.title3))
-            Text("A faction follows a resident's occupation. Membership can change when someone gets a new job. Approval remembers government decisions (−100 to +100); happiness is wellbeing and loyalty is personal allegiance (0–100). Buying approval alone does not fix hunger or unemployment.")
+            Text("Neighbours group together around the work they do. Their approval shows how they feel about your decisions; happiness shows how life is going. A popular decision won’t fill an empty market.")
                 .font(.subheadline).foregroundStyle(RepublicTheme.inkSoft)
             ForEach(FactionKind.allCases, id: \.rawValue) { kind in
                 faction(kind)
@@ -508,7 +521,7 @@ private struct FactionCouncilPanel: View {
                 }
                 ForEach(report.demands) { demand in
                     VStack(alignment: .leading, spacing: 4) {
-                        Label("Active demand · see Before the council below", systemImage: "exclamationmark.bubble")
+                        Label("Active demand · see On your desk below", systemImage: "exclamationmark.bubble")
                         if let deadline = demand.expiresOnDay {
                             Text("Expires after Day \(deadline). Ignoring it costs \(demand.ignoreCost) approval when it lapses.")
                         }
