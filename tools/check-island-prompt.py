@@ -7,6 +7,11 @@ source=(root/'PocketRepublic/Views/IslandView.swift').read_text().split('struct 
 checks=r'''
 var state = WorldGenerator.generate(seed: 42)
 SimulationEngine.rebuildSpatialCaches(&state)
+let openingHash = state.stateHash()
+let opening = IslandPrompt.make(in: state)
+precondition(opening.title.contains("3") && !opening.title.contains("16"))
+precondition(opening.message.contains("automatically"))
+precondition(state.stateHash() == openingHash)
 SimulationEngine.assignWork(&state)
 for i in state.citizens.indices { state.citizens[i].happiness = 60 }
 let before = state.stateHash()

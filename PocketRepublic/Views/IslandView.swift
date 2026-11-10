@@ -19,6 +19,8 @@ struct IslandView: View {
     @AppStorage("pocket.republic.intro.enabled.v1") private var automaticTours = true
     @AppStorage("pocket.republic.tutorial.active-seed.v1") private var guidedSeed = ""
     @AppStorage("pocket.republic.field-guide.visible.v1") private var showFieldGuide = true
+    @State private var hudHeight: CGFloat = 0
+    @State private var dockHeight: CGFloat = 0
     @State private var sceneReady = false
     @State private var scene = IslandScene(size: CGSize(width: 400, height: 470))
     @State private var tool: CityTool = .inspect
@@ -73,7 +75,8 @@ struct IslandView: View {
                                            sheetExpanded: sheetExpanded,
                                            tentControlsOpen: tentControlsOpen,
                                            detailOpen: detailOpen,
-                                           cardOpen: cardOpen)
+                                           cardOpen: cardOpen,
+                                           hudHeight: hudHeight, dockHeight: dockHeight)
             ZStack(alignment: .topLeading) {
                 SpriteView(scene: scene, isPaused: !islandVisible || appPhase != .active)
                     .allowsHitTesting(!tour.active).accessibilityHidden(tour.active)
@@ -83,6 +86,9 @@ struct IslandView: View {
                     HStack(alignment: .top, spacing: 8) {
                         status(in: layout)
                             .frame(maxWidth: 560)
+                            .background(GeometryReader { hud in
+                                Color.clear.preference(key: IslandHUDHeight.self, value: hud.size.height)
+                            })
                         Spacer(minLength: 0)
                         if layout.canUseTent {
                             Button {
@@ -150,6 +156,8 @@ struct IslandView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .clipShape(Rectangle())
+            .onPreferenceChange(IslandHUDHeight.self) { hudHeight = $0 }
+            .onPreferenceChange(IslandDockHeight.self) { dockHeight = $0 }
             .onAppear {
                 let session = game.citySession
                 scene.onFirstFrame = {
@@ -484,6 +492,10 @@ struct IslandView: View {
         .shadow(color: .black.opacity(0.25), radius: 12, y: 4)
         .frame(maxWidth: 680)
         .padding(.horizontal, 10)
+        .fixedSize(horizontal: false, vertical: true)
+        .background(GeometryReader { dock in
+            Color.clear.preference(key: IslandDockHeight.self, value: dock.size.height)
+        })
     }
 
     @ViewBuilder private var dockTools: some View {
@@ -611,6 +623,10 @@ struct IslandView: View {
                 }
                 Spacer(minLength: 0)
                 Menu {
+                    Button(roadmapLine, systemImage: "flag.fill") {
+                        if DevelopmentTree.isEnabled(in: game.state) { showRoadmap = true }
+                        else { showCharter = true }
+                    }
                     Button("Island notebook", systemImage: "book.closed") { showJournal = true }
                     Button("Let’s build your town", systemImage: "graduationcap") { startTutorial() }
                         .disabled(game.state.blocksAdvance || game.saveIssue != nil)
@@ -644,22 +660,6 @@ struct IslandView: View {
             if guidedSeed == String(game.state.worldSeed) {
                 tutorialCoach
             } else {
-            Button {
-                if DevelopmentTree.isEnabled(in: game.state) { showRoadmap.toggle() }
-                else { showCharter.toggle() }
-            } label: {
-                HStack(spacing: 6) {
-                    Image(systemName: "flag.fill").foregroundStyle(RepublicTheme.brass)
-                    Text(roadmapLine).lineLimit(2)
-                    Spacer(minLength: 0)
-                    Image(systemName: "chevron.right").font(.caption2)
-                }
-                .font(.caption2.weight(.medium))
-                .frame(minHeight: 24)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .accessibilityHint("Opens your next development goal and its requirements")
             if let issue = game.saveIssue {
                 Text(issue).font(.caption).foregroundStyle(.red)
             } else if let hint = tool.isBuilding ? placementHint : game.feedback {
@@ -1713,6 +1713,32 @@ struct IslandView: View {
 /// A single display keeps the map full width with a draggable bottom panel.
 /// A spanned inner display puts the world and the controls on separate panes.
 /// Tent view is chosen on the outer landscape display, which has no separate scene signal.
+private struct IslandHUDHeight: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = max(value, nextValue()) }
+}
+
+private struct IslandDockHeight: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = max(value, nextValue()) }
+}
+
+// MARK: - Pure map viewport bounds
+struct IslandMapBounds {
+    let focus: CGRect
+    let controls: CGRect
+
+    init(size: CGSize, desiredPanelHeight: CGFloat, hudHeight: CGFloat, dockHeight: CGFloat) {
+        let width = max(0, size.width)
+        let height = max(0, size.height)
+        let panelHeight = min(height, max(desiredPanelHeight, dockHeight + 8))
+        let mapHeight = max(0, height - panelHeight)
+        let top = min(max(0, hudHeight + 16), max(0, mapHeight - 80))
+        focus = CGRect(x: 0, y: top, width: width, height: mapHeight - top)
+        controls = CGRect(x: 0, y: mapHeight, width: width, height: panelHeight)
+    }
+}
+
 private struct CityDisplayLayout {
     enum Mode { case singlePortrait, singleLandscape, tent, spannedFlat, bookFold, laptopFold }
     let mode: Mode
@@ -1726,7 +1752,8 @@ private struct CityDisplayLayout {
 
     init(geometry: GeometryProxy, verticalSizeClass: UserInterfaceSizeClass?,
          layoutDirection: LayoutDirection, tentMode: Bool,
-         sheetExpanded: Bool, tentControlsOpen: Bool, detailOpen: Bool, cardOpen: Bool) {
+         sheetExpanded: Bool, tentControlsOpen: Bool, detailOpen: Bool, cardOpen: Bool,
+         hudHeight: CGFloat, dockHeight: CGFloat) {
         self.detailOpen = detailOpen
         self.cardOpen = cardOpen
         let size = geometry.size
@@ -1778,11 +1805,10 @@ private struct CityDisplayLayout {
             } else {
                 height = size.width >= 640 ? 76 : 128
             }
-            let panelHeight = min(size.height, max(0, height))
-            focus = CGRect(x: 0, y: 0, width: size.width,
-                           height: max(0, size.height - panelHeight))
-            controls = CGRect(x: 0, y: size.height - panelHeight,
-                              width: size.width, height: panelHeight)
+            let viewport = IslandMapBounds(size: size, desiredPanelHeight: height,
+                                           hudHeight: hudHeight, dockHeight: dockHeight)
+            focus = viewport.focus
+            controls = viewport.controls
         }
         // Standard containers handle safe areas. This check protects a manual
         // control pane from a camera occlusion that lands inside it.
@@ -2181,7 +2207,8 @@ struct IslandPrompt {
             return Self(title: "The builders are at work", message: "It opens after a few days of building. You can plan the next street while they finish.", button: "Check progress", action: goal.action)
         }
         if goal.id.hasPrefix("jobs") {
-            return Self(title: "\(outOfWork) neighbours are looking for work", message: goal.id == "jobs-access" ? "There are jobs waiting. Make sure their homes and workplaces share a road; they’ll take it from there." : "A workshop gives people a living and your town room to grow. Let’s find a spot beside the road.", button: goal.id == "jobs-access" ? "Show the jobs" : "Build a workshop", action: goal.action)
+            let shortage = max(0, outOfWork - SettlementOutlook(state: state).openJobs)
+            return Self(title: goal.id == "jobs-access" ? "Jobs are ready for your neighbours" : "Make room for \(shortage) more jobs", message: goal.id == "jobs-access" ? "Neighbours take connected jobs as the day begins. Check that their homes and workplaces share a road." : "Existing jobs fill automatically as the day begins. A workshop gives the rest of your neighbours somewhere to work.", button: goal.id == "jobs-access" ? "Show the jobs" : "Build a workshop", action: goal.action)
         }
         if goal.id == "housing" {
             return Self(title: "Make room for new neighbours", message: "Your homes are full. One more house is the start of a new street.", button: "Build a home", action: goal.action)

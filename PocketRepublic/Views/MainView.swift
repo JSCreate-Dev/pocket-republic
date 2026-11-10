@@ -11,13 +11,15 @@ struct MainView: View {
     @State private var showSaveManager = false
 
     var body: some View {
-        ZStack {
-            island.opacity(tab == 0 ? 1 : 0).allowsHitTesting(tab == 0).accessibilityHidden(tab != 0)
-            if tab == 1 { people }
-            if tab == 2 { govern }
-            if tab == 3 { events }
-        }
-        .safeAreaInset(edge: .bottom, spacing: 0) {
+        VStack(spacing: 0) {
+            ZStack {
+                island.opacity(tab == 0 ? 1 : 0).allowsHitTesting(tab == 0).accessibilityHidden(tab != 0)
+                if tab == 1 { people }
+                if tab == 2 { govern }
+                if tab == 3 { events }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .clipped()
             HStack(spacing: 4) {
                 navigationButton(0, "Island", "map.fill")
                 navigationButton(1, "People", "person.3.fill")
