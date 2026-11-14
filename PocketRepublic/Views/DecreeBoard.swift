@@ -222,9 +222,11 @@ struct DecreeBoard: View {
             return
         }
         let day = game.state.day
+        let before = game.state
         if game.send(.issueDecree(card.title)) {
             decreeError = nil
-            decreeReceipt = "\(card.displayTitle) · Day \(day) · \(card.costLabel). \(card.duration)"
+            let outcome = DecreeOutcomeReading.lines(before: before, after: game.state).joined(separator: "\n")
+            decreeReceipt = "\(card.displayTitle) · Day \(day)\n\(outcome)\n\(card.duration)"
             openDecree = card.title
         } else {
             decreeError = game.saveIssue ?? game.feedback ?? "Could not issue the decree."
@@ -395,6 +397,32 @@ struct DecreeCardReading: Identifiable {
 
 }
 
+/// Reports changes actually applied, including clamping, rather than promising
+/// that a political decision already improved hunger, jobs or happiness.
+enum DecreeOutcomeReading {
+    static func lines(before: RepublicState, after: RepublicState) -> [String] {
+        var result: [String] = []
+        if before.treasury != after.treasury { result.append("Treasury: $\(before.treasury) → $\(after.treasury).") }
+        if before.policy.incomeTaxPercent != after.policy.incomeTaxPercent {
+            result.append("Income tax: \(before.policy.incomeTaxPercent)% → \(after.policy.incomeTaxPercent)%.")
+        }
+        if before.policy.civicWage != after.policy.civicWage {
+            result.append("Public pay: $\(before.policy.civicWage) → $\(after.policy.civicWage) per worker each day.")
+        }
+        let foodBefore = before.buildings.reduce(Int64(0)) { $0 + Int64($1.foodStore) }
+        let foodAfter = after.buildings.reduce(Int64(0)) { $0 + Int64($1.foodStore) }
+        if foodAfter > foodBefore { result.append("\(foodAfter - foodBefore) food added to building stores. People still need access and money for meals.") }
+        for faction in after.factions {
+            guard let old = before.factions.first(where: { $0.kind == faction.kind }), old.favor != faction.favor else { continue }
+            result.append("\(faction.kind.displayName) approval: \(old.favor) → \(faction.favor).")
+        }
+        if before.legitimacy != after.legitimacy { result.append("Public trust: \(before.legitimacy) → \(after.legitimacy).") }
+        if before.corruption != after.corruption { result.append("Corruption: \(before.corruption) → \(after.corruption).") }
+        if result.isEmpty { result.append("Decree issued. Its stated rules and cooldown now apply.") }
+        return result
+    }
+}
+
 /// The same authoritative nodes drive Govern and the island roadmap panel.
 struct DevelopmentRoadmap: View {
     @EnvironmentObject private var game: Game
@@ -472,7 +500,7 @@ struct DevelopmentRoadmap: View {
                                 .accessibilityValue("\(requirement.current) of \(requirement.target)")
                         }
                     }
-                    Text("Awarded automatically when the requirements hold after Next Day.")
+                    Text("Earned automatically when these conditions hold at the next daily update.")
                         .font(.caption2).foregroundStyle(RepublicTheme.inkSoft)
                 }
             }

@@ -19,6 +19,7 @@ struct IslandView: View {
     @AppStorage("pocket.republic.intro.enabled.v1") private var automaticTours = true
     @AppStorage("pocket.republic.tutorial.active-seed.v1") private var guidedSeed = ""
     @AppStorage("pocket.republic.field-guide.visible.v1") private var showFieldGuide = true
+    @AppStorage("pocket.republic.opening-journey.v1") private var journeyRecord = ""
     @State private var hudHeight: CGFloat = 0
     @State private var dockHeight: CGFloat = 0
     @State private var sceneReady = false
@@ -823,14 +824,21 @@ struct IslandView: View {
         showJournal = false
     }
 
-    private var tutorialReadyForPolitics: Bool {
-        guideLessons.first(where: { $0.id == "arrivals" })?.complete == true
-    }
+    private var openingJourney: OpeningJourney { OpeningJourney(state: game.state, record: journeyRecord) }
+
+    private var tutorialReadyForPolitics: Bool { openingJourney.complete }
 
     private var islandPrompt: IslandPrompt { IslandPrompt.make(in: game.state) }
 
     private var tutorialCoach: some View {
         VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text(openingJourney.chapter).font(.caption2.weight(.semibold))
+                Spacer(minLength: 4)
+                Text("\(openingJourney.finishedCount) / 4").font(.caption2.monospacedDigit())
+            }.foregroundStyle(RepublicTheme.paper.opacity(0.8))
+            ProgressView(value: Double(openingJourney.finishedCount), total: 4)
+                .tint(RepublicTheme.brass).accessibilityLabel("Founding milestones")
             HStack(alignment: .top, spacing: 8) {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(tutorialReadyForPolitics ? "Your town is growing" : islandPrompt.title)
@@ -838,7 +846,7 @@ struct IslandView: View {
                     Text(tool.isBuilding ? "Find a spot beside the road. When the preview turns green, tap Build here."
                          : tool == .road ? "Draw a route, then tap Lay road. Two fingers move the map."
                          : tutorialReadyForPolitics ? "Meet the people behind your republic. Their worries will shape your next choices."
-                         : islandPrompt.message)
+                         : openingJourney.instruction(fallback: islandPrompt.message, goal: focusGoals.first?.id ?? ""))
                         .font(.caption).foregroundStyle(RepublicTheme.paper).fixedSize(horizontal: false, vertical: true)
                 }
                 Spacer(minLength: 0)
@@ -854,7 +862,12 @@ struct IslandView: View {
                     .font(.caption.weight(.semibold)).frame(minHeight: 44)
                     .buttonStyle(.borderedProminent).tint(RepublicTheme.terracotta)
                     .disabled(game.state.blocksAdvance || game.saveIssue != nil)
-                    Button("Tell me more") { showJournal = true }.font(.caption).frame(minHeight: 44).buttonStyle(.plain)
+                    if clock.policy.pace == .paused {
+                        Button("Resume days") { clock.togglePause() }
+                            .font(.caption.weight(.semibold)).frame(minHeight: 44).buttonStyle(.plain)
+                    } else {
+                        Button("Tell me more") { showJournal = true }.font(.caption).frame(minHeight: 44).buttonStyle(.plain)
+                    }
                 }
             }
         }
@@ -867,6 +880,8 @@ struct IslandView: View {
     private func observeIsland(_ state: RepublicState) {
         focusGoals = CityFocusReader.goals(in: state)
         guideLessons = SettlementGuide.lessons(in: state)
+        let journey = OpeningJourney(state: state, record: journeyRecord)
+        if journey.record != journeyRecord { journeyRecord = journey.record }
         let snapshot = CityDaySnapshot(state: state)
         guard let previous = dayBaseline, previous.seed == snapshot.seed else {
             dayBaseline = snapshot
@@ -1478,7 +1493,7 @@ struct IslandView: View {
             case .valid:
                 canPlace = true
                 let days = game.state.config.constructionDays(for: kind)
-                verdict = days > 0 ? "Opens in \(days) day\(days == 1 ? "" : "s")." : "Opens today."
+                verdict = "Ready to build · entrance beside a road. " + (days > 0 ? "Opens in \(days) day\(days == 1 ? "" : "s")." : "Opens today.")
             case .rejected(let reason):
                 canPlace = false
                 verdict = DevelopmentTree.lockReason(for: kind, in: game.state) ?? reason.playerFacingReason
@@ -1490,9 +1505,9 @@ struct IslandView: View {
         return VStack(alignment: .leading, spacing: 6) {
             Text("\(tool.label) · $\(kind?.buildCost ?? 0)")
                 .font(.caption.weight(.semibold))
-            Text(verdict)
+            Label(verdict, systemImage: canPlace ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
                 .font(.caption2)
-                .foregroundStyle(canPlace ? Color.secondary : Color.orange)
+                .foregroundStyle(canPlace ? RepublicTheme.fertile : Color.orange)
                 .fixedSize(horizontal: false, vertical: true)
             if kind == .farm && mapOverlay != .fertility {
                 Button("Show fertility layer") { mapOverlay = .fertility }
@@ -1552,6 +1567,7 @@ struct IslandView: View {
                     // panel over the result. View site opens that panel explicitly.
                     selectedBuildingID = nil
                     scene.setSelection(id)
+                    scene.focus(on: building.entrance)
                     UIAccessibility.post(notification: .announcement,
                         argument: "\(String(describing: kind).capitalized) construction started. Cost \(kind.buildCost).")
                 }
@@ -2186,6 +2202,43 @@ private struct FoundingTourOverlay: View {
 }
 
 /// A short local voice for the existing, real needs; not a new quest or reward.
+// MARK: - Observed opening milestones (presentation only)
+struct OpeningJourney {
+    let mask: Int
+    let seed: UInt64
+    var record: String { "\(seed):\(mask)" }
+    var finishedCount: Int { (0..<4).prefix { mask & (1 << $0) != 0 }.count }
+    var complete: Bool { finishedCount == 4 }
+    var chapter: String {
+        ["A living from the island", "A place to call home", "A good place to live", "Your first new neighbours", "Your republic begins"][finishedCount]
+    }
+
+    init(state: RepublicState, record: String) {
+        seed = state.worldSeed
+        let parts = record.split(separator: ":")
+        var earned = parts.count == 2 && UInt64(parts[0]) == seed ? (Int(parts[1]) ?? 0) & 15 : 0
+        let lessons = SettlementGuide.lessons(in: state)
+        // Record evidence in order. A foundation or a click never completes a step.
+        // Once witnessed on this island, ordinary fluctuations do not undo the lesson.
+        for (index, lesson) in lessons.prefix(4).enumerated() {
+            guard earned & (1 << index) != 0 || lesson.complete else { break }
+            earned |= 1 << index
+        }
+        if state.config.settlementGrowth != nil && state.citizens.filter(\.alive).count > 16 { earned = 15 }
+        mask = earned
+    }
+
+    func instruction(fallback: String, goal: String) -> String {
+        guard goal == "housing" || goal == "arrivals" else { return fallback }
+        switch finishedCount {
+        case 1: return "Work is underway. Give your next neighbours a home beside the connected streets, then let the builders finish."
+        case 2: return "Homes and work are ready. Keep meals within reach and see what would make life here happier."
+        case 3: return "You’ve made room for a future here. Let the days run; neighbours arrive when homes, jobs, food and happiness are still ready at the arrival check."
+        default: return fallback
+        }
+    }
+}
+
 struct IslandPrompt {
     let title: String
     let message: String
@@ -2203,8 +2256,11 @@ struct IslandPrompt {
         if goal.id == "food" {
             return Self(title: "People are going hungry", message: "Let’s check their market. Food needs a road to their homes, and they need money to buy it.", button: "Check their food", action: goal.action)
         }
-        if goal.id.hasPrefix("site-") {
-            return Self(title: "The builders are at work", message: "It opens after a few days of building. You can plan the next street while they finish.", button: "Check progress", action: goal.action)
+        if goal.id.hasPrefix("site-"), case .inspect(let id) = goal.action,
+           id.raw >= 0, Int(id.raw) < state.buildings.count {
+            let site = state.buildings[Int(id.raw)]
+            let left = max(0, site.daysRequired - site.daysConstructed)
+            return Self(title: "The builders are at work", message: "Your \(String(describing: site.kind).lowercased()) needs \(left) more day\(left == 1 ? "" : "s") of building. Let the days run; the jobs or beds become available when it opens.", button: "Check progress", action: goal.action)
         }
         if goal.id.hasPrefix("jobs") {
             let shortage = max(0, outOfWork - SettlementOutlook(state: state).openJobs)

@@ -72,6 +72,7 @@ final class IslandScene: SKScene {
     private var inspectEntrance: TileIndex?
     private var tileTextures: [String: SKTexture] = [:]
     private var visibleRect: TileRect?
+    private var lastBusinessUpdate: TimeInterval = -.infinity
     private var animationTime: TimeInterval = 0
     private var cameraInitialized = false
     private var cameraUserAdjusted = false
@@ -208,6 +209,7 @@ final class IslandScene: SKScene {
         lastNoticeSelection = -.infinity
         noteConstruction(in: state)
         renderedState = state
+        lastBusinessUpdate = -.infinity
         overlaySnapshot = overlayMode == .standard ? nil : MapOverlaySnapshot(mode: overlayMode, state: state)
         if !cameraInitialized {
             let middle = state.map.width / 2
@@ -338,7 +340,7 @@ final class IslandScene: SKScene {
                 for x in rect.x0...rect.x1 {
                     let tile = map.index(x: x, y: y)
                     wantedTiles.insert(tile.raw)
-                    let signature = MapArt.tileSignature(x: x, y: y, map: map)
+                    let signature = MapArt.tileSignature(x: x, y: y, map: map) + "|quiet:\(overlayMode != .standard)"
                     if let node = tileNodes[tile.raw] {
                         if node.name != signature { configureTile(node, x: x, y: y, map: map, signature: signature) }
                     } else {
@@ -547,7 +549,61 @@ final class IslandScene: SKScene {
         configureBusinessLife(on: container, building: building)
     }
 
+    /// Small reusable details live only on visible buildings, never in the save.
+    private func configureTradeDetails(on container: SKNode, building: Building) {
+        guard building.isOperational, [.farm, .market, .dock].contains(building.kind) else {
+            container.childNode(withName: "business-life")?.removeFromParent()
+            return
+        }
+        guard container.childNode(withName: "business-life") == nil, let state = renderedState else { return }
+        let life = SKNode()
+        life.name = "business-life"
+        let door = point(for: building.entrance, in: state.map)
+        life.position = CGPoint(x: door.x - container.position.x, y: door.y - container.position.y + 8)
+        life.zPosition = 3
+        for index in 0..<4 {
+            let detail = SKShapeNode(rectOf: CGSize(width: 5, height: 4), cornerRadius: 1)
+            detail.name = "stock-\(index)"
+            detail.position = CGPoint(x: CGFloat(index % 2) * 6 - 3, y: CGFloat(index / 2) * 4)
+            detail.lineWidth = 0.6
+            detail.strokeColor = UIColor(red: 0.38, green: 0.25, blue: 0.10, alpha: 1)
+            detail.fillColor = building.kind == .market
+                ? (index.isMultiple(of: 2) ? .systemOrange : .systemGreen)
+                : UIColor(red: 0.78, green: 0.61, blue: 0.28, alpha: 1)
+            life.addChild(detail)
+        }
+        container.addChild(life)
+        lastBusinessUpdate = -.infinity
+    }
+
+    private func updateBusinessLife(at time: TimeInterval) {
+        guard time - lastBusinessUpdate >= 0.25, let state = renderedState else { return }
+        lastBusinessUpdate = time
+        let hour = walkingClock.elapsed.truncatingRemainder(dividingBy: MapArt.visualDay) / MapArt.secondsPerHour
+        let quiet = overlayMode != .standard || placementKind != nil || roadDrawing
+        for (id, container) in buildingNodes {
+            guard id.raw >= 0, Int(id.raw) < state.buildings.count else { continue }
+            let building = state.buildings[Int(id.raw)]
+            let profile = IslandBusinessProfile(hour: hour, operational: building.isOperational,
+                workers: building.workers.count, food: Int(building.foodStore),
+                tracksFood: building.kind == .market || building.kind == .farm, quiet: quiet,
+                reducedMotion: UIAccessibility.isReduceMotionEnabled)
+            if let smoke = container.childNode(withName: "workshop-smoke") as? SKEmitterNode {
+                smoke.particleBirthRate = profile.animate ? 1.2 : 0
+                smoke.isHidden = quiet
+            }
+            if let life = container.childNode(withName: "business-life") {
+                life.isHidden = quiet || !profile.open
+                for (index, detail) in life.children.enumerated() { detail.isHidden = index >= profile.stockDetails }
+                // Gentle handling of produce at open businesses; no simulated goods are spawned.
+                let phase = time * 1.4 + Double(id.raw)
+                life.zRotation = profile.animate ? CGFloat(sin(phase) * 0.025) : 0
+            }
+        }
+    }
+
     private func configureBusinessLife(on container: SKNode, building: Building) {
+        configureTradeDetails(on: container, building: building)
         guard building.kind == .workshop, building.isOperational, !building.workers.isEmpty,
               overlayMode == .standard, !UIAccessibility.isReduceMotionEnabled else {
             container.childNode(withName: "workshop-smoke")?.removeFromParent()
@@ -863,8 +919,12 @@ final class IslandScene: SKScene {
         if terrain == .water, !MapArt.shoreNames(x: x, y: y, map: map).isEmpty {
             node.color = UIColor(red: 0.30, green: 0.82, blue: 0.72, alpha: 1)
             node.colorBlendFactor = 0.16
-        } else { node.colorBlendFactor = terrain == .water ? 0.03 : 0.02 }
-        if terrain == .water, !UIAccessibility.isReduceMotionEnabled,
+        } else if terrain == .water {
+            let bank = IslandEnvironmentProfile.waterDepth(x: x, y: y)
+            node.color = UIColor(red: 0.035, green: 0.27 + bank * 0.05, blue: 0.46 + bank * 0.05, alpha: 1)
+            node.colorBlendFactor = 0.18
+        } else { node.colorBlendFactor = 0.02 }
+        if terrain == .water, overlayMode == .standard, !UIAccessibility.isReduceMotionEnabled,
            let first = MapArt.texture(named: groundName), let next = MapArt.texture(named: "\(groundName)_f1") {
             // Align newly visible water to the scene's shared two-frame phase.
             // Panning does not restart every tile on a different ripple frame.
@@ -894,6 +954,12 @@ final class IslandScene: SKScene {
             shore.anchorPoint = CGPoint(x: 0.5, y: 0.5)
             shore.alpha = 0.42
             shore.zPosition = 0.4
+            if !UIAccessibility.isReduceMotionEnabled, overlayMode == .standard {
+                let phase = Double(MapArt.mix(x / 3, y / 3) % 5) * 0.3
+                shore.run(.sequence([.wait(forDuration: phase), .repeatForever(.sequence([
+                    .fadeAlpha(to: 0.64, duration: 2.8), .fadeAlpha(to: 0.32, duration: 2.8)
+                ]))]), withKey: "shore-wash")
+            }
             node.addChild(shore)
         }
         node.name = signature
@@ -1017,7 +1083,7 @@ final class IslandScene: SKScene {
         guard let id = selectedCitizenID, let state = renderedState,
               id.raw >= 0, Int(id.raw) < state.citizens.count, state.citizens[Int(id.raw)].alive else { return }
         guard !interruptedWalks.contains(id) else { return }
-        let routine = self.routine(for: state.citizens[Int(id.raw)], in: state, access: state.buildingAccess())
+        let routine = routines[id] ?? self.routine(for: state.citizens[Int(id.raw)], in: state, access: state.buildingAccess())
         guard let first = routine.path.first else { return }
         let path = CGMutablePath()
         path.move(to: point(for: first, in: state.map))
@@ -1204,6 +1270,7 @@ final class IslandScene: SKScene {
         updateLighting(at: currentTime)
         if cameraNode.action(forKey: "founding-tour") != nil { refreshVisible() }
         stepCrew(time: currentTime)
+        updateBusinessLife(at: currentTime)
         updateCitizenActivity(at: currentTime)
 
         let map = state.map
@@ -1222,7 +1289,7 @@ final class IslandScene: SKScene {
                              map: WorldMap, time: TimeInterval) {
         guard !interruptedWalks.contains(citizen.id) else { node.alpha = 0; return }
         let localTime = walkingClock.elapsed + walkerPhase(for: citizen.id)
-        guard let pose = walkerPose(routine, at: localTime, map: map) else { return }
+        guard let pose = walkerPose(routine, at: localTime, citizen: citizen.id.raw, map: map) else { return }
         node.position = pose.position
         node.zPosition = pose.sort
         // Residents enter their home/workplace instead of standing on its
@@ -1256,7 +1323,7 @@ final class IslandScene: SKScene {
         return Double(hash >> 24) / 255 * MapArt.secondsPerHour * 0.75
     }
 
-    private func walkerPose(_ routine: DailyRoutine, at time: TimeInterval, map: WorldMap) -> WalkerPose? {
+    private func walkerPose(_ routine: DailyRoutine, at time: TimeInterval, citizen: Int32, map: WorldMap) -> WalkerPose? {
         guard let fallback = routine.entrances.first ?? routine.path.first else { return nil }
         let hour = time.truncatingRemainder(dividingBy: MapArt.visualDay) / MapArt.secondsPerHour
         for i in routine.dwellStart.indices where i < routine.dwellEnd.count && i < routine.entrances.count {
@@ -1271,7 +1338,7 @@ final class IslandScene: SKScene {
             guard hour >= Double(leave), hour < Double(arrive) else { continue }
             let span = Double(arrive - leave)
             let t = span > 0 ? (hour - Double(leave)) / span : 1
-            return along(routine.legPaths[i], progress: t, map: map)
+            return along(routine.legPaths[i], progress: IslandWalkPresentation.progress(t, citizen: citizen), map: map)
         }
         return standing(routine.entrances.last ?? fallback, map: map)
     }
@@ -1289,7 +1356,11 @@ final class IslandScene: SKScene {
         let index = min(leg.count - 2, Int(scaled))
         let a = leg[index], b = leg[index + 1]
         let part = CGFloat(scaled - Double(index))
-        let pa = point(for: a, in: map), pb = point(for: b, in: map)
+        var pa = point(for: a, in: map), pb = point(for: b, in: map)
+        let laneA = laneOffset(at: index, leg: leg, map: map)
+        let laneB = laneOffset(at: index + 1, leg: leg, map: map)
+        pa.x += laneA.x; pa.y += laneA.y
+        pb.x += laneB.x; pb.y += laneB.y
         let dx = map.x(of: b) - map.x(of: a)
         let dy = map.y(of: b) - map.y(of: a)
         let frontX = max(map.x(of: a), map.x(of: b))
@@ -1300,6 +1371,18 @@ final class IslandScene: SKScene {
             facing: WalkerFacing.forStep(dx: dx, dy: dy),
             sort: CGFloat(frontX + frontY) / 100 + 0.02
         )
+    }
+
+    /// Walk on the right of each road, blending at corners and returning to the
+    /// exact door at each endpoint. Never offset a resident into a building tile.
+    private func laneOffset(at index: Int, leg: [TileIndex], map: WorldMap) -> CGPoint {
+        guard index > 0, index + 1 < leg.count, map.isRoad(at: leg[index]),
+              map.building(at: leg[index]) == nil else { return .zero }
+        let before = leg[index - 1], after = leg[index + 1]
+        let dx = CGFloat(map.x(of: after) - map.x(of: before)) / 2
+        let dy = CGFloat(map.y(of: after) - map.y(of: before)) / 2
+        return CGPoint(x: (-dy - dx) * halfWidth * 0.065,
+                       y: (dy - dx) * halfHeight * 0.065)
     }
 
     private var proceduralWalker: SKTexture {
@@ -1399,6 +1482,16 @@ final class IslandScene: SKScene {
             arrow.position = CGPoint(x: pin.position.x, y: pin.position.y + 5)
             arrow.zPosition = 4
             ghostLayer.addChild(arrow)
+            if let road = map.neighbours(of: entrance).first(where: { map.isRoad(at: $0) }) {
+                let path = CGMutablePath()
+                path.move(to: pin.position)
+                path.addLine(to: point(for: road, in: map))
+                let connection = SKShapeNode(path: path)
+                connection.strokeColor = pin.color
+                connection.lineWidth = 3
+                connection.zPosition = 3
+                ghostLayer.addChild(connection)
+            }
         }
         let height = BuildingSpriteCatalog.spec(for: kind).pointSize.height
         if let reason {
@@ -1981,7 +2074,8 @@ private enum MapArt {
             guard bucket % 9 == 0 else { return nil }
             name = "deco_palm_\((bucket / 9) % 3)"
         case .grass:
-            guard bucket % 13 == 0 else { return nil }
+            let grove = mix(x / 5, y / 5) % 3 == 0
+            guard bucket % (grove ? 7 : 23) == 0 else { return nil }
             name = ["deco_bush_0", "deco_bush_1", "deco_flowers_0"][(bucket / 13) % 3]
         case .fertile:
             guard bucket % 17 == 0 else { return nil }
@@ -2067,6 +2161,48 @@ extension MapOverlayMode {
         case .foodAccess: return "Homes & roads: green stocked market · amber empty market · red no access · gray no coverage data."
         case .employment: return "District residents employed: red 0% → amber 50% → green 100%. Gray: no residents."
         }
+    }
+}
+
+// MARK: - Pure living-world presentation
+enum IslandEnvironmentProfile {
+    /// Smooth deterministic material variation across tile boundaries. This is
+    /// cosmetic depth, not saved terrain or buildable land.
+    static func waterDepth(x: Int32, y: Int32) -> Double {
+        let cellX = Int32(floor(Double(x) / 8)), cellY = Int32(floor(Double(y) / 8))
+        let u = Double(x) / 8 - Double(cellX), v = Double(y) / 8 - Double(cellY)
+        let sx = u * u * (3 - 2 * u), sy = v * v * (3 - 2 * v)
+        func sample(_ a: Int32, _ b: Int32) -> Double {
+            let bits = (UInt32(bitPattern: a) &* 73_856_093) ^ (UInt32(bitPattern: b) &* 19_349_663)
+            return Double((bits ^ (bits >> 13)) % 1024) / 1023
+        }
+        let top = sample(cellX, cellY) * (1 - sx) + sample(cellX + 1, cellY) * sx
+        let bottom = sample(cellX, cellY + 1) * (1 - sx) + sample(cellX + 1, cellY + 1) * sx
+        return top * (1 - sy) + bottom * sy
+    }
+}
+
+struct IslandBusinessProfile {
+    let open: Bool
+    let animate: Bool
+    let stockDetails: Int
+
+    init(hour: Double, operational: Bool, workers: Int, food: Int, tracksFood: Bool,
+         quiet: Bool, reducedMotion: Bool) {
+        open = operational && workers > 0 && hour.isFinite && hour >= 6 && hour < 20
+        animate = open && !quiet && !reducedMotion
+        stockDetails = !open ? 0 : tracksFood ? min(4, max(0, food) / 10 + (food > 0 ? 1 : 0)) : 4
+    }
+}
+
+enum IslandWalkPresentation {
+    /// Bounded, strictly forward easing. Residents retain their real route and
+    /// arrival window, with individual acceleration rather than lockstep sliding.
+    static func progress(_ raw: Double, citizen: Int32) -> Double {
+        guard raw.isFinite else { return 0 }
+        let t = min(1, max(0, raw))
+        let variation = Double(UInt32(bitPattern: citizen) % 5) * 0.007
+        return t + (0.025 + variation) * sin(t * .pi * 2)
     }
 }
 

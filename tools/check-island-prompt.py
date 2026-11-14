@@ -28,6 +28,9 @@ let site = WorldGenerator.place(&state, .workshop, near: centre)!
 state.buildings[Int(site.raw)].daysRequired = 3
 let waiting = IslandPrompt.make(in: state)
 precondition(waiting.action == .inspect(site), "Do not offer another workshop while one is building")
+precondition(waiting.message.contains("3 more days"))
+state.buildings[Int(site.raw)].daysConstructed = 2
+precondition(IslandPrompt.make(in: state).message.contains("1 more day of building"))
 state.buildings[Int(site.raw)].daysConstructed = 3
 SimulationEngine.rebuildSpatialCaches(&state)
 SimulationEngine.assignWork(&state)
