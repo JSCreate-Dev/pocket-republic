@@ -12,11 +12,11 @@ enum AgendaEffectCopy {
         if let export = effect.foodExport, export > 0 {
             lines.append("Sends up to \(export) food off the island. The coin scales with what standing markets can ship.")
         }
-        if effect.legitimacy != 0 { lines.append(signed("Legitimacy", effect.legitimacy)) }
+        if effect.legitimacy != 0 { lines.append(signed("Public trust", effect.legitimacy)) }
         if effect.corruption != 0 { lines.append(signed("Corruption", effect.corruption)) }
-        if effect.incomeTaxDelta != 0 { lines.append(signed("Income tax", effect.incomeTaxDelta, suffix: " points")) }
+        if effect.incomeTaxDelta != 0 { lines.append(signed("Household tax", effect.incomeTaxDelta, suffix: " points")) }
         if effect.businessTaxDelta != 0 { lines.append(signed("Business tax", effect.businessTaxDelta, suffix: " points")) }
-        if effect.civicWageDelta != 0 { lines.append(signed("Civic wage", effect.civicWageDelta)) }
+        if effect.civicWageDelta != 0 { lines.append(signed("Public pay", effect.civicWageDelta)) }
         if effect.districtUnrest != 0 { lines.append(signed("District unrest", effect.districtUnrest)) }
         if effect.districtNeglectReset { lines.append("Clears neglect in the district") }
         let chips = factionChips(effect)
@@ -75,7 +75,7 @@ enum CauseSpeech {
         case "hungry residents":
             return "\(cause.value) hungry residents"
         case "citizens hungry 3+ days", "income tax":
-            return detail == "income tax" ? "income tax is \(cause.value)%" : detail
+            return detail == "income tax" ? "household tax is \(cause.value)%" : detail
         case "destitute":
             return "destitute"
         default:

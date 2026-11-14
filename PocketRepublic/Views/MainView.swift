@@ -96,24 +96,24 @@ struct MainView: View {
 
     private var govern: some View {
         NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: RepublicTheme.Space.lg) {
-                    Text("A town to look after").font(RepublicTheme.heading(.title2)).foregroundStyle(RepublicTheme.ink)
-                    Text("Listen to your neighbours. Decide what kind of place this will become.")
-                        .font(.subheadline).foregroundStyle(RepublicTheme.inkSoft)
-                    DecreeBoard()
-                    DisclosureGroup("Where could we go next?") { DevelopmentRoadmap() }
-                        .foregroundStyle(RepublicTheme.ink)
-                    save
+            ScrollViewReader { scroll in
+                ScrollView {
+                    VStack(alignment: .leading, spacing: RepublicTheme.Space.lg) {
+                        DecreeBoard(onShowIsland: { tab = 0 }, onReviewDecree: {
+                            scroll.scrollTo("government-decrees", anchor: .top)
+                        })
+                        DisclosureGroup("Where could we go next?") { DevelopmentRoadmap() }
+                            .foregroundStyle(RepublicTheme.ink)
+                        save
+                    }.padding(RepublicTheme.Space.md)
                 }
-                .padding(RepublicTheme.Space.md)
+                .background(RepublicTheme.cream)
             }
-            .background(RepublicTheme.cream)
             .navigationTitle("Govern")
             .navigationBarTitleDisplayMode(.inline)
-                .toolbarColorScheme(.light, for: .navigationBar)
-                .toolbarBackground(RepublicTheme.cream, for: .navigationBar)
-                .toolbarBackground(.visible, for: .navigationBar)
+            .toolbarColorScheme(.light, for: .navigationBar)
+            .toolbarBackground(RepublicTheme.cream, for: .navigationBar)
+            .toolbarBackground(.visible, for: .navigationBar)
         }
     }
 

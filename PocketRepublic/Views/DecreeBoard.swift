@@ -5,7 +5,13 @@ import PocketRepublicCore
 /// "Not now" only closes the card. It does not send the agenda's dismiss option,
 /// which would remove the council offer.
 struct DecreeBoard: View {
+    var onShowIsland: () -> Void = {}
+    var onReviewDecree: () -> Void = {}
     @EnvironmentObject private var game: Game
+    @EnvironmentObject private var clock: DayClock
+    @State private var policyDraft: GovernmentPolicyDraft?
+    @State private var decreeGroup: GovernmentDecreeGroup = .all
+    @State private var showAllLetters = false
     @State private var openDecree: String?
     @State private var confirmDecree: DecreeCardReading?
     @State private var decreeReceipt: String?
@@ -13,13 +19,34 @@ struct DecreeBoard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: RepublicTheme.Space.lg) {
-            FactionCouncilPanel()
+            today
+            governmentFeedback
             council
+            policies
             standing
-            tax
-            decrees
+            FactionCouncilPanel()
+            decrees.id("government-decrees")
         }
         .foregroundStyle(RepublicTheme.ink)
+        .sheet(item: $policyDraft, onDismiss: { clock.setModal("government-policy", presented: false) }) { draft in
+            GovernmentPolicyEditor(draft: draft, onApply: { value in
+                let applied = applyPolicy(draft, value: value)
+                if applied { policyDraft = nil }
+                return applied
+            }, onCancel: { policyDraft = nil })
+        }
+        .onChange(of: policyDraft?.id) { _, id in clock.setModal("government-policy", presented: id != nil) }
+        .onChange(of: confirmDecree?.id) { _, id in clock.setModal("government-decree", presented: id != nil) }
+        .onChange(of: game.citySession) { _, _ in
+            policyDraft = nil; confirmDecree = nil; decreeReceipt = nil; decreeError = nil
+            clock.setModal("government-policy", presented: false)
+            clock.setModal("government-decree", presented: false)
+        }
+        .onDisappear {
+            policyDraft = nil; confirmDecree = nil
+            clock.setModal("government-policy", presented: false)
+            clock.setModal("government-decree", presented: false)
+        }
         .confirmationDialog("Issue this decree?", isPresented: Binding(
             get: { confirmDecree != nil }, set: { if !$0 { confirmDecree = nil } }
         ), titleVisibility: .visible) {
@@ -33,11 +60,18 @@ struct DecreeBoard: View {
     }
 
     private var standing: some View {
-        HStack(alignment: .top, spacing: RepublicTheme.Space.md) {
-            meter("Legitimacy", game.snapshot.legitimacy, highIsGood: true)
-            meter("Corruption", game.snapshot.corruption, highIsGood: false)
-        }
-        .dioramaCard(fill: RepublicTheme.sand.opacity(0.35))
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .top, spacing: RepublicTheme.Space.md) {
+                meter("Public trust", game.snapshot.legitimacy, highIsGood: true)
+                meter("Corruption", game.snapshot.corruption, highIsGood: false)
+            }
+            if let district = game.state.districts.max(by: { $0.unrest < $1.unrest }) {
+                Text("Most unsettled district: \(district.name) · \(district.unrest)% unrest")
+                    .font(.caption.weight(.semibold))
+            }
+            Text("Trust and corruption describe your government. Happiness describes daily life; faction approval records how groups feel about your decisions.")
+                .font(.caption).foregroundStyle(RepublicTheme.inkSoft)
+        }.dioramaCard(fill: RepublicTheme.sand.opacity(0.35))
     }
 
     private func meter(_ title: String, _ value: Int32, highIsGood: Bool) -> some View {
@@ -55,27 +89,79 @@ struct DecreeBoard: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    private var tax: some View {
-        Stepper(value: Binding(
-            get: { Int(game.state.policy.incomeTaxPercent) },
-            set: { newValue in
-                var next = game.state.policy
-                next.incomeTaxPercent = Int32(newValue)
-                game.send(.setPolicy(next))
+    private var today: some View {
+        let brief = GovernmentBrief(state: game.state)
+        return VStack(alignment: .leading, spacing: 8) {
+            Label("Today in your republic", systemImage: "sun.max.fill").font(.caption.weight(.semibold))
+            Text(brief.title).font(RepublicTheme.heading(.title3))
+            Text(brief.message).font(.subheadline).foregroundStyle(RepublicTheme.inkSoft)
+            if let title = brief.suggestion, let spec = DecreeCatalogue.all.first(where: { $0.name == title }) {
+                let reading = DecreeCardReading.make(spec: spec, state: game.state)
+                Text("One option: \(reading.displayTitle) · \(reading.costLabel). \(reading.availability ?? "Available to review below.")")
+                    .font(.caption.weight(.medium))
+                Button("Review \(reading.displayTitle)") {
+                    decreeGroup = .all; openDecree = title; onReviewDecree()
+                }.frame(minHeight: 44).buttonStyle(.bordered)
             }
-        ), in: 0...80, step: 5) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Income tax")
-                    .font(RepublicTheme.heading(.headline))
-                Text("\(game.state.policy.incomeTaxPercent)%")
-                    .font(RepublicTheme.body(.title3))
-                    .foregroundStyle(RepublicTheme.turquoise)
-                Text("A lasting rate on taxable income. Higher tax raises revenue but can hurt residents' wellbeing.")
-                    .font(RepublicTheme.body(.caption)).foregroundStyle(RepublicTheme.inkSoft)
+            Button(game.state.blocksAdvance ? "Resolve the decision on the island" : "Look at the island") { onShowIsland() }
+                .frame(minHeight: 44).buttonStyle(.bordered)
+        }.dioramaCard(fill: RepublicTheme.sand.opacity(0.35))
+    }
+
+    @ViewBuilder private var governmentFeedback: some View {
+        if let error = decreeError {
+            Label(error, systemImage: "exclamationmark.triangle")
+                .font(.subheadline).foregroundStyle(RepublicTheme.alert)
+        }
+        if let receipt = decreeReceipt {
+            HStack(alignment: .top) {
+                Label(receipt, systemImage: "checkmark.seal.fill")
+                Spacer(minLength: 8)
+                Button { decreeReceipt = nil } label: { Image(systemName: "xmark").frame(width: 44, height: 44) }
+                    .accessibilityLabel("Dismiss government result")
+            }.font(.subheadline).dioramaCard(fill: RepublicTheme.grass.opacity(0.15))
+        }
+    }
+
+    private var policies: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("The everyday rules").font(RepublicTheme.heading(.title3))
+            Text("These rates stay in place until you change them. Review one at a time; nothing changes while you try a value.")
+                .font(.subheadline).foregroundStyle(RepublicTheme.inkSoft)
+            ForEach(GovernmentPolicyField.allCases) { field in
+                Button { policyDraft = GovernmentPolicyDraft(field: field, state: game.state) } label: {
+                    HStack(alignment: .top, spacing: 10) {
+                        Image(systemName: field.symbol).frame(width: 24)
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(field.title).font(.headline)
+                            Text(field.label(field.value(in: game.state.policy))).font(.subheadline.weight(.semibold))
+                            Text(field.explanation).font(.caption).foregroundStyle(RepublicTheme.inkSoft)
+                            Text("Review a change").font(.caption.weight(.semibold)).foregroundStyle(RepublicTheme.terracotta)
+                        }
+                        Spacer(minLength: 0)
+                        Image(systemName: "chevron.right").font(.caption)
+                    }.frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                        .padding(12).background(RepublicTheme.sand.opacity(0.35), in: RoundedRectangle(cornerRadius: 12))
+                }.buttonStyle(.plain).disabled(game.saveIssue != nil || game.state.blocksAdvance)
             }
         }
-        .dioramaCard()
-        .disabled(game.saveIssue != nil)
+    }
+
+    private func applyPolicy(_ draft: GovernmentPolicyDraft, value: Int64) -> Bool {
+        guard !game.state.blocksAdvance, game.saveIssue == nil,
+              let next = draft.policy(value: value, in: game.state) else {
+            decreeError = "The island or this rate changed. Close this review and open it again."
+            return false
+        }
+        let before = game.state
+        guard game.send(.setPolicy(next)) else {
+            decreeError = game.saveIssue ?? game.feedback ?? "That change could not be applied."
+            return false
+        }
+        let result = DecreeOutcomeReading.lines(before: before, after: game.state).joined(separator: "\n")
+        decreeReceipt = "\(draft.field.title) updated.\n\(result)\nThe new rate applies at the next daily update."
+        decreeError = nil
+        return true
     }
 
     private var decrees: some View {
@@ -86,20 +172,18 @@ struct DecreeBoard: View {
                 .font(RepublicTheme.body(.subheadline)).foregroundStyle(RepublicTheme.inkSoft)
             Text("▲ They approve · ▼ They object. More arrows mean a stronger reaction.")
                 .font(RepublicTheme.body(.caption)).foregroundStyle(RepublicTheme.inkSoft)
-            if let error = decreeError {
-                Label(error, systemImage: "exclamationmark.triangle")
-                    .font(RepublicTheme.body(.subheadline)).foregroundStyle(RepublicTheme.alert)
-            }
-            if let receipt = decreeReceipt {
-                HStack(alignment: .top) {
-                    Label(receipt, systemImage: "checkmark.seal.fill")
-                    Spacer(minLength: 8)
-                    Button { decreeReceipt = nil } label: { Image(systemName: "xmark").frame(width: 44, height: 44) }
-                        .accessibilityLabel("Dismiss decree receipt")
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(GovernmentDecreeGroup.allCases) { group in
+                        Button(group.rawValue) { decreeGroup = group; openDecree = nil }
+                            .font(.caption.weight(.semibold)).padding(.horizontal, 12).frame(minHeight: 44)
+                            .background(decreeGroup == group ? RepublicTheme.sand : RepublicTheme.cream,
+                                        in: RoundedRectangle(cornerRadius: 10))
+                            .accessibilityAddTraits(decreeGroup == group ? .isSelected : [])
+                    }
                 }
-                .font(RepublicTheme.body(.subheadline)).dioramaCard(fill: RepublicTheme.grass.opacity(0.15))
             }
-            ForEach(DecreeCatalogue.all, id: \.name) { spec in
+            ForEach(DecreeCatalogue.all.filter { decreeGroup.includes($0) }, id: \.name) { spec in
                 decreeRow(spec)
             }
         }
@@ -111,13 +195,19 @@ struct DecreeBoard: View {
                 AgendaSheetOrder.rank(tier: item.tier, isIslandEvent: item.islandEventID != nil,
                                       isDecree: item.kind == .decree, isOriginDilemma: item.originDilemma == true)
             }
-            return rank(lhs) < rank(rhs)
+            if rank(lhs) != rank(rhs) { return rank(lhs) < rank(rhs) }
+            if lhs.expiresOnDay != rhs.expiresOnDay { return (lhs.expiresOnDay ?? Int32.max) < (rhs.expiresOnDay ?? Int32.max) }
+            return lhs.id.raw < rhs.id.raw
         }
         if !items.isEmpty {
-            Text("On your desk")
+            Text("Letters that need your attention")
                 .font(RepublicTheme.heading(.title3))
-            ForEach(items) { item in
-                councilCard(item)
+            Text("Requests have deadlines; ordinary advice can wait. Opening a letter does not accept it.")
+                .font(.caption).foregroundStyle(RepublicTheme.inkSoft)
+            ForEach(showAllLetters ? items : Array(items.prefix(1))) { item in councilCard(item) }
+            if items.count > 1 {
+                Button(showAllLetters ? "Show the next letter only" : "Read the other \(items.count - 1) letters") { showAllLetters.toggle() }
+                    .frame(minHeight: 44).buttonStyle(.bordered)
             }
         }
     }
@@ -206,7 +296,7 @@ struct DecreeBoard: View {
             }
             .buttonStyle(.borderedProminent)
             .tint(RepublicTheme.terracotta)
-            .disabled(!card.canIssue || game.saveIssue != nil)
+            .disabled(!card.canIssue || game.saveIssue != nil || game.state.blocksAdvance)
             Button("Not now") { openDecree = nil }
                 .frame(maxWidth: .infinity, minHeight: 44)
         }
@@ -214,7 +304,12 @@ struct DecreeBoard: View {
     }
 
     private func issue(_ card: DecreeCardReading) {
-        guard let spec = DecreeCatalogue.all.first(where: { $0.name == card.title }) else { return }
+        guard game.saveIssue == nil, !game.state.blocksAdvance,
+              let spec = DecreeCatalogue.all.first(where: { $0.name == card.title }) else {
+            decreeError = "Finish the waiting decision or storage warning first."
+            confirmDecree = nil
+            return
+        }
         let current = DecreeCardReading.make(spec: spec, state: game.state)
         guard current.canIssue else {
             decreeError = current.availability ?? "This decree can no longer be issued."
@@ -247,6 +342,181 @@ struct DecreeBoard: View {
     }
 }
 
+/// One review screen for one lasting rate; the live policy changes only on Apply.
+private struct GovernmentPolicyEditor: View {
+    let draft: GovernmentPolicyDraft
+    let onApply: (Int64) -> Bool
+    let onCancel: () -> Void
+    @EnvironmentObject private var game: Game
+    @State private var value: Int
+    @State private var error: String?
+
+    init(draft: GovernmentPolicyDraft, onApply: @escaping (Int64) -> Bool, onCancel: @escaping () -> Void) {
+        self.draft = draft; self.onApply = onApply; self.onCancel = onCancel
+        _value = State(initialValue: max(0, Int(clamping: draft.original)))
+    }
+
+    private var upper: Int { draft.field == .publicPay ? max(20, Int(clamping: draft.original)) : max(80, Int(clamping: draft.original)) }
+    private var reading: GovernmentPolicyReading { GovernmentPolicyReading(field: draft.field, value: Int64(value), state: game.state) }
+    private var canApply: Bool {
+        game.saveIssue == nil && !game.state.blocksAdvance && draft.policy(value: Int64(value), in: game.state) != nil
+    }
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    Text(draft.field.explanation).font(.subheadline)
+                    Text("In place now: \(draft.field.label(draft.original))").font(.caption).foregroundStyle(RepublicTheme.inkSoft)
+                    Stepper(value: $value, in: 0...upper, step: draft.field == .publicPay ? 1 : 5) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Proposed rate").font(.caption)
+                            Text(draft.field.label(Int64(value))).font(.title3.weight(.semibold))
+                        }
+                    }.padding(12).background(RepublicTheme.sand.opacity(0.3), in: RoundedRectangle(cornerRadius: 12))
+                    Text(reading.headline).font(.headline)
+                    Text(reading.detail).font(.subheadline).foregroundStyle(RepublicTheme.inkSoft)
+                    if let warning = reading.warning {
+                        Label(warning, systemImage: "exclamationmark.triangle.fill")
+                            .font(.subheadline).foregroundStyle(RepublicTheme.alert)
+                    }
+                    Text("What to watch next").font(.headline)
+                    Text(reading.watch).font(.subheadline)
+                    Text("This sets a lasting rate. It does not award a decree’s faction-approval bonuses. Cancel leaves the existing rate in place.")
+                        .font(.caption).foregroundStyle(RepublicTheme.inkSoft)
+                    if let error { Text(error).font(.subheadline).foregroundStyle(RepublicTheme.alert) }
+                    if let issue = game.saveIssue { Text(issue).font(.caption).foregroundStyle(RepublicTheme.alert) }
+                    if game.state.blocksAdvance { Text("A crisis or election needs your decision first.").font(.caption).foregroundStyle(RepublicTheme.alert) }
+                    Button("Apply \(draft.field.label(Int64(value)))") {
+                        if !onApply(Int64(value)) { error = "This review is no longer current. Close it and review the rate again." }
+                    }.frame(maxWidth: .infinity, minHeight: 44).buttonStyle(.borderedProminent)
+                        .tint(RepublicTheme.terracotta).disabled(!canApply)
+                    Button("Keep the current rate", action: onCancel)
+                        .frame(maxWidth: .infinity, minHeight: 44).buttonStyle(.bordered)
+                }.padding(16)
+            }
+            .background(RepublicTheme.cream).foregroundStyle(RepublicTheme.ink)
+            .navigationTitle(draft.field.title).navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel", action: onCancel) } }
+        }.presentationDetents([.large])
+    }
+}
+
+// MARK: - Government policy readers (no simulation mutation)
+enum GovernmentPolicyField: String, CaseIterable, Identifiable {
+    case household, business, publicPay
+    var id: String { rawValue }
+    var title: String {
+        switch self { case .household: return "Household tax"; case .business: return "Business tax"; case .publicPay: return "Public workers’ pay" }
+    }
+    var symbol: String {
+        switch self { case .household: return "person.2.fill"; case .business: return "storefront.fill"; case .publicPay: return "building.columns.fill" }
+    }
+    var explanation: String {
+        switch self {
+        case .household: return "Collected each day from the money residents hold after wages and food. A higher rate leaves them less to spend."
+        case .business: return "Collected each day from cash held by standing private buildings, including homes. Higher rates leave workplaces less for wages and supplies."
+        case .publicPay: return "The treasury pays clerks, nurses, teachers and police each day. This changes their pay, not private-sector wages."
+        }
+    }
+    func value(in policy: Policy) -> Int64 {
+        switch self { case .household: return Int64(policy.incomeTaxPercent); case .business: return Int64(policy.businessTaxPercent); case .publicPay: return policy.civicWage }
+    }
+    func label(_ value: Int64) -> String { self == .publicPay ? "$\(value) / worker / day" : "\(value)% each day" }
+}
+
+struct GovernmentPolicyDraft: Identifiable {
+    let field: GovernmentPolicyField
+    let original: Int64
+    let seed: UInt64
+    var id: String { field.rawValue }
+    init(field: GovernmentPolicyField, state: RepublicState) {
+        self.field = field; original = field.value(in: state.policy); seed = state.worldSeed
+    }
+    func policy(value: Int64, in state: RepublicState) -> Policy? {
+        guard !state.blocksAdvance, state.worldSeed == seed, field.value(in: state.policy) == original,
+              value >= 0, value != original else { return nil }
+        var next = state.policy
+        switch field {
+        case .household: guard value <= 80 else { return nil }; next.incomeTaxPercent = Int32(value)
+        case .business: guard value <= 80 else { return nil }; next.businessTaxPercent = Int32(value)
+        case .publicPay: guard value <= max(20, original) else { return nil }; next.civicWage = value
+        }
+        return next
+    }
+}
+
+struct GovernmentPolicyReading {
+    let headline: String
+    let detail: String
+    let warning: String?
+    let watch: String
+    init(field: GovernmentPolicyField, value: Int64, state: RepublicState) {
+        switch field {
+        case .household:
+            headline = "For each $100 held at collection, $\(value) goes to the treasury."
+            detail = "It is a daily share of held money, not just new income. People earn and spend before collection; small payments round down."
+            warning = value > Int64(state.config.taxPainPerPercentOver)
+                ? "Above \(state.config.taxPainPerPercentOver)%, this rate adds tax pressure to wellbeing. Residents may also have less money for meals." : nil
+            watch = "Watch household cash, hunger and happiness over the next few days. Lower tax does not create food or jobs."
+        case .business:
+            headline = "For each $100 held by a private building, $\(value) goes to the treasury."
+            detail = "Collected after the day’s trading and wages. This is a share of remaining cash, not a tax on sales or profit."
+            warning = value > Int64(state.policy.businessTaxPercent)
+                ? "A larger share can squeeze the cash workplaces need for the next day’s wages and supplies." : nil
+            watch = "Watch workplace funds, unpaid wages and market stock. Lower tax leaves cash in buildings; it does not pay a grant."
+        case .publicPay:
+            let staff = state.buildings.filter { $0.kind.isCivic && $0.isStanding(on: state.map) }.reduce(0) { $0 + $1.workers.count }
+            let bill = value.multipliedReportingOverflow(by: Int64(staff))
+            headline = bill.overflow ? "Payroll is too large to estimate." : "Scheduled public payroll: $\(bill.partialValue) per day for \(staff) workers."
+            detail = "At current staffing. Hiring changes the bill; actual payments are limited by treasury funds. No money moves when you apply the rate."
+            warning = value == 0 ? "A $0 rate stops public wages. These workers still need money for food."
+                : bill.overflow || bill.partialValue > state.treasury ? "The treasury cannot cover one full day at this staffing and pay rate." : nil
+            watch = "Watch treasury funds and public workers’ household cash. A higher rate does not automatically hire more people or expand service coverage."
+        }
+    }
+}
+
+enum GovernmentDecreeGroup: String, CaseIterable, Identifiable {
+    case all = "All", food = "Food", money = "Money", community = "Community", order = "Trust & order"
+    var id: String { rawValue }
+    func includes(_ spec: DecreeSpec) -> Bool {
+        if self == .all { return true }
+        let e = spec.effect
+        let group: GovernmentDecreeGroup
+        if e.foodImport > 0 { group = .food }
+        else if e.incomeTaxDelta != 0 || e.businessTaxDelta != 0 || e.civicWageDelta != 0 { group = .money }
+        else if e.districtNeglectReset || (e.districtUnrest < 0 && e.legitimacy >= 0 && e.corruption == 0) { group = .community }
+        else { group = .order }
+        return group == self
+    }
+}
+
+struct GovernmentBrief {
+    let title: String
+    let message: String
+    let suggestion: String?
+    init(state: RepublicState) {
+        let hungry = state.citizens.filter { $0.alive && $0.daysHungry > 0 }.count
+        let jobless = state.citizens.filter { $0.alive && $0.work == nil }.count
+        if state.blocksAdvance {
+            title = "Your island needs a decision"; message = "A crisis or election is waiting. Settle that first; the next day is held."; suggestion = nil
+        } else if hungry > 0 {
+            title = "\(hungry) neighbours need a meal"; message = "Check that their market has food, a road connection and customers who can afford a meal. Emergency food adds stock; it does not fix every cause of hunger."; suggestion = "Decree bread rationing"
+        } else if state.treasury < 200 {
+            title = "Keep an eye on the treasury"; message = "There is $\(state.treasury) available. Review daily public pay before making a lasting promise. Higher taxes bring a tradeoff for households and workplaces."; suggestion = nil
+        } else if state.corruption >= 40 {
+            title = "Trust needs some care"; message = "Corruption is \(state.corruption)%. An audit can reduce it, but it costs money and angers some officials."; suggestion = "Purge the graft registers"
+        } else if let troubled = state.districts.max(by: { $0.unrest < $1.unrest }), troubled.unrest >= 40 {
+            title = "Tension is rising in \(troubled.name)"; message = "A festival can ease unrest, but check food, work and services too. Calmer streets do not mean the underlying problem is solved."; suggestion = "Proclaim a market festival"
+        } else if jobless > SettlementOutlook(state: state).openJobs {
+            title = "People need somewhere to work"; message = "Let existing jobs fill automatically, then make room for the rest. A tax change cannot replace a missing workplace."; suggestion = nil
+        } else {
+            title = "Room to choose your next move"; message = "There is no crisis holding the day. Listen to requests, keep daily costs affordable and choose the changes that suit your island."; suggestion = nil
+        }
+    }
+}
+
 /// App-side reading of a decree. Keeps the card off `PocketRepublicCore`.
 struct DecreeCardReading: Identifiable {
     struct Chip: Identifiable {
@@ -266,8 +536,8 @@ struct DecreeCardReading: Identifiable {
         case "Proclaim a market festival": return "Hold a market festival"
         case "Purge the graft registers": return "Root out corruption"
         case "Raise the civic wage": return "Raise public workers’ pay"
-        case "Declare a tax holiday": return "Ease income taxes"
-        case "Levy an emergency rate": return "Raise income taxes"
+        case "Declare a tax holiday": return "Ease household taxes"
+        case "Levy an emergency rate": return "Raise household taxes"
         case "Impose a night curfew": return "Crack down on unrest"
         case "Order a public works season": return "Give neglected districts some care"
         default: return title
@@ -321,7 +591,7 @@ struct DecreeCardReading: Identifiable {
         }
         if e.incomeTaxDelta != 0 {
             let next = max(0, min(80, state.policy.incomeTaxPercent + e.incomeTaxDelta))
-            return (e.incomeTaxDelta < 0 ? "Reduce the income-tax burden." : "Raise income tax for future collections.",
+            return (e.incomeTaxDelta < 0 ? "Leave more cash with households." : "Collect a larger share of household cash each day.",
                     "Lasting rate: \(state.policy.incomeTaxPercent)% → \(next)%. No automatic expiry.",
                     "The rate stays until changed again. Tax relief can reduce revenue; higher taxes can harm wellbeing. Faction effects apply immediately.")
         }
@@ -404,7 +674,10 @@ enum DecreeOutcomeReading {
         var result: [String] = []
         if before.treasury != after.treasury { result.append("Treasury: $\(before.treasury) → $\(after.treasury).") }
         if before.policy.incomeTaxPercent != after.policy.incomeTaxPercent {
-            result.append("Income tax: \(before.policy.incomeTaxPercent)% → \(after.policy.incomeTaxPercent)%.")
+            result.append("Household tax: \(before.policy.incomeTaxPercent)% → \(after.policy.incomeTaxPercent)%.")
+        }
+        if before.policy.businessTaxPercent != after.policy.businessTaxPercent {
+            result.append("Business tax: \(before.policy.businessTaxPercent)% → \(after.policy.businessTaxPercent)%.")
         }
         if before.policy.civicWage != after.policy.civicWage {
             result.append("Public pay: $\(before.policy.civicWage) → $\(after.policy.civicWage) per worker each day.")
